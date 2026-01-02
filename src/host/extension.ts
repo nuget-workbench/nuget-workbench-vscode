@@ -68,6 +68,7 @@ class NugetViewProvider implements vscode.WebviewViewProvider {
     context: vscode.WebviewViewResolveContext,
     token: vscode.CancellationToken
   ): void | Thenable<void> {
+    Logger.debug("Resolving webview view");
     let hostBus: IBus = new HostBus(webviewView.webview);
     mediator = new Mediator(hostBus);
 
@@ -112,4 +113,6 @@ class NugetViewProvider implements vscode.WebviewViewProvider {
 }
 
 // This method is called when your extension is deactivated
-export function deactivate() {}
+export function deactivate() {
+  Logger.info("Extension deactivated");
+}

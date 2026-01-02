@@ -26,9 +26,9 @@ export default class GetConfiguration implements IRequestHandler<GetConfiguratio
 
     // Add passwordScriptPath from VSCode settings
     const vscodeSourcesRaw = config.get<Array<string>>("sources") ?? [];
-    vscodeSourcesRaw.forEach((x) => {
+    vscodeSourcesRaw.forEach((rawSourceConfig) => {
       try {
-        const parsed = JSON.parse(x) as { 
+        const parsed = JSON.parse(rawSourceConfig) as {
           name?: string;
           passwordScriptPath?: string;
         };
@@ -38,8 +38,8 @@ export default class GetConfiguration implements IRequestHandler<GetConfiguratio
             source.PasswordScriptPath = parsed.passwordScriptPath;
           }
         }
-      } catch {
-        // Skip invalid JSON
+      } catch (e) {
+        Logger.warn(`GetConfiguration: Failed to parse source configuration: ${rawSourceConfig}`, e);
       }
     });
 

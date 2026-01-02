@@ -79,6 +79,10 @@ export class Logger {
         this.log('ERROR', message, ...args);
     }
 
+    public static debug(message: string, ...args: any[]): void {
+        this.log('DEBUG', message, ...args);
+    }
+
     private static sendEvent(name: string, data?: Attributes, startTime?: TimeInput, endTime?: TimeInput): void {
         if (!this._isEnabled || !this._tracer) return;
 

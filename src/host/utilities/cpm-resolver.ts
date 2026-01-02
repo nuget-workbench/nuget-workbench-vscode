@@ -2,6 +2,7 @@ import fs from "fs";
 import * as path from "path";
 import { DOMParser } from "@xmldom/xmldom";
 import xpath from "xpath";
+import { Logger } from "../../common/logger";
 
 export default class CpmResolver {
   private static cache: Map<string, Map<string, string>> = new Map();
@@ -61,6 +62,7 @@ export default class CpmResolver {
 
       return true;
     } catch (error) {
+      Logger.error(`CpmResolver: Failed to check CPM status for ${projectPath}`, error);
       return false;
     }
   }
@@ -88,6 +90,7 @@ export default class CpmResolver {
 
       this.cache.set(cpmFilePath, versionMap);
     } catch (error) {
+      Logger.error(`CpmResolver: Failed to parse CPM versions from ${cpmFilePath}`, error);
     }
 
     return versionMap;
