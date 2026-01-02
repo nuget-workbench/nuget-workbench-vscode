@@ -6,6 +6,7 @@ import os from "os";
 import * as vscode from "vscode";
 import PasswordScriptExecutor from "./password-script-executor";
 import CredentialsCache from "./credentials-cache";
+import { Logger } from "../../common/logger";
 
 export type SourceWithCredentials = {
   Name: string;
@@ -77,7 +78,7 @@ export default class NuGetConfigResolver {
           source.Password = decodedPassword;
           CredentialsCache.set(source.Name, source.Username, decodedPassword);
         } catch (error) {
-          console.error(`Failed to decode password for ${source.Name}:`, error);
+          Logger.error(`NuGetConfigResolver.GetSourcesAndDecodePasswords: Failed to decode password for ${source.Name}`, error);
           CredentialsCache.set(source.Name, source.Username, source.Password);
         }
       } else if (source.Username || source.Password) {
@@ -116,7 +117,7 @@ export default class NuGetConfigResolver {
           disabledSources.add(name);
         });
       } catch (error) {
-        console.error(`Failed to parse ${configPath}:`, error);
+        Logger.error(`NuGetConfigResolver.GetSourcesWithCredentials: Failed to parse ${configPath}`, error);
       }
     }
 

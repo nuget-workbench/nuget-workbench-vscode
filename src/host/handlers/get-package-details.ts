@@ -7,7 +7,7 @@ export class GetPackageDetails
   implements IRequestHandler<GetPackageDetailsRequest, GetPackageDetailsResponse>
 {
   async HandleAsync(request: GetPackageDetailsRequest): Promise<GetPackageDetailsResponse> {
-    Logger.info(`GetPackageDetails: Fetching details from ${request.PackageVersionUrl}`);
+    Logger.info(`GetPackageDetails.HandleAsync: Fetching details from ${request.PackageVersionUrl}`);
     if (!request.SourceUrl) return this.GetError("SourceUrl is empty");
     if (!request.PackageVersionUrl) return this.GetError("PackageVersionUrl is empty");
 
@@ -20,8 +20,7 @@ export class GetPackageDetails
       };
       return result;
     } catch (err: any) {
-      Logger.error(`GetPackageDetails: Failed to fetch package details from ${request.PackageVersionUrl}`, err);
-      console.error("Failed to fetch package details:", err);
+      Logger.error(`GetPackageDetails.HandleAsync: Failed to fetch package details from ${request.PackageVersionUrl}`, err);
       return this.GetError('Failed to fetch package details');
     }
   }

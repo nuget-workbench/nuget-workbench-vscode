@@ -6,11 +6,11 @@ import { Logger } from "../../common/logger";
 
 export default class ProjectParser {
   static Parse(projectPath: string, cpmVersions?: Map<string, string> | null): Project {
-    Logger.debug(`Parsing project: ${projectPath}`);
+    Logger.debug(`ProjectParser.Parse: Parsing project: ${projectPath}`);
     let projectContent = fs.readFileSync(projectPath, "utf8");
     let document = new DOMParser().parseFromString(projectContent);
     if (document == undefined) {
-      Logger.error(`ProjectParser: ${projectPath} has invalid content`);
+      Logger.error(`ProjectParser.Parse: ${projectPath} has invalid content`);
       throw `${projectPath} has invalid content`;
     }
 
@@ -30,7 +30,7 @@ export default class ProjectParser {
         if (cpmVersion) {
           version = cpmVersion;
         } else {
-          Logger.warn(`ProjectParser: CPM version not found for package ${packageId} in ${projectPath}`);
+          Logger.warn(`ProjectParser.Parse: CPM version not found for package ${packageId} in ${projectPath}`);
         }
       }
 

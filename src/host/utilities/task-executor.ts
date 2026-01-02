@@ -6,14 +6,14 @@ class TaskExecutor {
   private globalMutex: Mutex = new Mutex();
 
   async ExecuteTask(task: vscode.Task): Promise<void> {
-    Logger.info(`TaskExecutor: Executing task ${task.name}`);
+    Logger.info(`TaskExecutor.ExecuteTask: Executing task ${task.name}`);
     let releaser = await this.globalMutex.acquire();
     let mutex = new Mutex();
     mutex.acquire();
     let execution = await vscode.tasks.executeTask(task);
     let callback = vscode.tasks.onDidEndTask((x) => {
       if (x.execution.task == execution.task) {
-        Logger.info(`TaskExecutor: Task ${task.name} completed`);
+        Logger.info(`TaskExecutor.ExecuteTask: Task ${task.name} completed`);
         mutex.release();
       }
     });

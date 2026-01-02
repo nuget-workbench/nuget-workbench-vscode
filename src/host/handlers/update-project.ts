@@ -7,7 +7,7 @@ import { Logger } from "../../common/logger";
 
 export default class UpdateProject implements IRequestHandler<UpdateProjectRequest, UpdateProjectResponse> {
   async HandleAsync(request: UpdateProjectRequest): Promise<UpdateProjectResponse> {
-    Logger.info(`UpdateProject: Handling ${request.Type} for package ${request.PackageId} in project ${request.ProjectPath}`);
+    Logger.info(`UpdateProject.HandleAsync: Handling ${request.Type} for package ${request.PackageId} in project ${request.ProjectPath}`);
     const skipRestoreConfiguration = vscode.workspace.getConfiguration("NugetGallery").get<string>("skipRestore") ?? "";
     const isCpmEnabled = CpmResolver.GetPackageVersions(request.ProjectPath) !== null;
 
@@ -36,7 +36,7 @@ export default class UpdateProject implements IRequestHandler<UpdateProjectReque
 
   // REMOVE: .NET 10 format: dotnet package remove <PACKAGE_ID> --project <PROJECT>
   private async RemovePackage(request: UpdateProjectRequest): Promise<void> {
-    Logger.info(`UpdateProject: Removing package ${request.PackageId}`);
+    Logger.info(`UpdateProject.RemovePackage: Removing package ${request.PackageId}`);
     const args: Array<string> = ["package", "remove", request.PackageId, "--project", request.ProjectPath.replace(/\\/g, "/")];
     const task = new vscode.Task(
       { type: "dotnet", task: `dotnet remove package` },
@@ -51,7 +51,7 @@ export default class UpdateProject implements IRequestHandler<UpdateProjectReque
 
   // INSTALL: .NET 10 format: dotnet package add <PACKAGE_ID> --project <PROJECT> --version <VERSION>
   private async AddPackage(request: UpdateProjectRequest, skipRestore: boolean): Promise<void> {
-    Logger.info(`UpdateProject: Adding package ${request.PackageId} version ${request.Version || 'latest'}`);
+    Logger.info(`UpdateProject.AddPackage: Adding package ${request.PackageId} version ${request.Version || 'latest'}`);
     const args: Array<string> = ["package", "add", request.PackageId, "--project", request.ProjectPath.replace(/\\/g, "/")];
     if (request.Version) {
         args.push("--version");

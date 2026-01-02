@@ -5,7 +5,7 @@ export default class UpdateConfiguration
   implements IRequestHandler<UpdateConfigurationRequest, UpdateConfigurationResponse>
 {
   async HandleAsync(request: UpdateConfigurationRequest): Promise<UpdateConfigurationResponse> {
-    Logger.info("UpdateConfiguration: Updating configuration");
+    Logger.info("UpdateConfiguration.HandleAsync: Updating configuration");
     let config = vscode.workspace.getConfiguration("NugetGallery");
 
     let sources = request.Configuration.Sources.map((x) => 
@@ -18,7 +18,7 @@ export default class UpdateConfiguration
 
     await config.update("skipRestore", request.Configuration.SkipRestore, vscode.ConfigurationTarget.Global);
     await config.update("sources", sources, vscode.ConfigurationTarget.Global);
-    Logger.info("UpdateConfiguration: Configuration updated successfully");
+    Logger.info("UpdateConfiguration.HandleAsync: Configuration updated successfully");
     return {};
   }
 }

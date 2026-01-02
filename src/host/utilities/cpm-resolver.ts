@@ -62,7 +62,7 @@ export default class CpmResolver {
 
       return true;
     } catch (error) {
-      Logger.error(`CpmResolver: Failed to check CPM status for ${projectPath}`, error);
+      Logger.error(`CpmResolver.IsCentralPackageManagementEnabled: Failed to check CPM status for ${projectPath}`, error);
       return false;
     }
   }
@@ -90,7 +90,7 @@ export default class CpmResolver {
 
       this.cache.set(cpmFilePath, versionMap);
     } catch (error) {
-      Logger.error(`CpmResolver: Failed to parse CPM versions from ${cpmFilePath}`, error);
+      Logger.error(`CpmResolver.ParsePackageVersions: Failed to parse CPM versions from ${cpmFilePath}`, error);
     }
 
     return versionMap;

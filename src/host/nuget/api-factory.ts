@@ -13,7 +13,7 @@ class NuGetApiFactory {
 
   public async GetSourceApi(url: string): Promise<NuGetApi> {
     if (!(url in this._sourceApiCollection)) {
-      Logger.debug(`NuGetApiFactory: Creating new API instance for ${url}`);
+      Logger.debug(`NuGetApiFactory.GetSourceApi: Creating new API instance for ${url}`);
       const workspaceFolders = vscode.workspace.workspaceFolders;
       const workspaceRoot = workspaceFolders?.[0]?.uri.fsPath;
       const sources = await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot);
@@ -24,7 +24,7 @@ class NuGetApiFactory {
 
       this._sourceApiCollection[url] = new NuGetApi(url, username, password);
     } else {
-      Logger.debug(`NuGetApiFactory: Returning cached API instance for ${url}`);
+      Logger.debug(`NuGetApiFactory.GetSourceApi: Returning cached API instance for ${url}`);
     }
 
     return this._sourceApiCollection[url];

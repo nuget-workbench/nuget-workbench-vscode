@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { spawn } from "child_process";
+import { Logger } from "../../common/logger";
 
 class PasswordScriptTerminal implements vscode.Pseudoterminal {
   private writeEmitter = new vscode.EventEmitter<string>();
@@ -129,7 +130,7 @@ export default class PasswordScriptExecutor {
 
       return decodedPassword;
     } catch (error: any) {
-      console.error(`Failed to execute password script ${scriptPath}:`, error);
+      Logger.error(`PasswordScriptExecutor.ExecuteScript: Failed to execute password script ${scriptPath}`, error);
       throw new Error(`Password script execution failed: ${error.message || error}`);
     }
   }

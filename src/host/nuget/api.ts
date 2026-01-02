@@ -1,5 +1,6 @@
 import axios, { AxiosError, AxiosInstance, AxiosProxyConfig, AxiosRequestConfig, AxiosResponse } from "axios";
 import * as vscode from "vscode";
+import { Logger } from "../../common/logger";
 
 type GetPackagesResponse = {
   data: Array<Package>;
@@ -86,8 +87,7 @@ export default class NuGetApi {
     try {
       let result = await this.http.get(url);
       if (result instanceof AxiosError) {
-        console.error("Axios Error Data:");
-        console.error(result.response?.data);
+        Logger.error("NuGetApi.GetPackageAsync: Axios Error Data:", result.response?.data);
         return {
           isError: true,
           errorMessage: "Package couldn't be found",
@@ -101,14 +101,14 @@ export default class NuGetApi {
         else {
           let pageData = await this.http.get(page["@id"]);
           if (pageData instanceof AxiosError) {
-            console.error("Axios Error while loading page data:", pageData.message);
+            Logger.error("NuGetApi.GetPackageAsync: Axios Error while loading page data:", pageData.message);
           } else {
             items.push(...pageData.data.items);
           }
         }
       }
     } catch (err) {
-      console.log("ERROR url:", url, err);
+      Logger.error(`NuGetApi.GetPackageAsync: ERROR url: ${url}`, err);
     }
 
     if (items.length <= 0) throw { message: "Package info couldn't be found for url:" + url };
@@ -174,7 +174,7 @@ export default class NuGetApi {
       return { data: packageDetails };
     }
     catch (err) {
-      console.error("ERROR fetching package details:", packageVersionUrl, err);
+      Logger.error(`NuGetApi.GetPackageDetailsAsync: ERROR fetching package details: ${packageVersionUrl}`, err);
       throw err;
     }
   }
@@ -204,8 +204,7 @@ export default class NuGetApi {
   ): Promise<AxiosResponse<any, any>> {
     const response = await this.http.get(url, config);
     if (response instanceof AxiosError) {
-      console.error("Axios Error Data:");
-      console.error(response.response?.data);
+      Logger.error("NuGetApi.ExecuteGet: Axios Error Data:", response.response?.data);
       throw {
         message: `${response.message} on request to${url}`,
       };
@@ -227,7 +226,7 @@ export default class NuGetApi {
     if (proxy && proxy !== "") {
       const proxy_url = new URL(proxy);
 
-      console.info(`Found proxy: ${proxy}`);
+      Logger.info(`NuGetApi.getProxy: Found proxy: ${proxy}`);
 
       return {
         host: proxy_url.hostname,

@@ -29,15 +29,15 @@ let mediator: IMediator;
 
 export function activate(context: vscode.ExtensionContext) {
   Logger.configure(context);
-  Logger.info("Extension activated");
+  Logger.info("Extension.activate: Extension activated");
   const provider = new NugetViewProvider(context.extensionUri);
 
   let previousVersion: string | undefined = context.globalState.get("NugetGallery.version");
   context.globalState.update("NugetGallery.version", context.extension.packageJSON.version);
   if (previousVersion == undefined) {
-    Logger.info("Extension installed");
+    Logger.info("Extension.activate: Extension installed");
   } else if (previousVersion != context.extension.packageJSON.version)
-    Logger.info("Extension upgraded from version %s", previousVersion);
+    Logger.info("Extension.activate: Extension upgraded from version %s", previousVersion);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("nuget.gallery.view", provider, {
@@ -68,7 +68,7 @@ class NugetViewProvider implements vscode.WebviewViewProvider {
     context: vscode.WebviewViewResolveContext,
     token: vscode.CancellationToken
   ): void | Thenable<void> {
-    Logger.debug("Resolving webview view");
+    Logger.debug("NugetViewProvider.resolveWebviewView: Resolving webview view");
     let hostBus: IBus = new HostBus(webviewView.webview);
     mediator = new Mediator(hostBus);
 
@@ -114,5 +114,5 @@ class NugetViewProvider implements vscode.WebviewViewProvider {
 
 // This method is called when your extension is deactivated
 export function deactivate() {
-  Logger.info("Extension deactivated");
+  Logger.info("Extension.deactivate: Extension deactivated");
 }

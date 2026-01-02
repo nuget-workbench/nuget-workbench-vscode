@@ -7,13 +7,13 @@ import { Logger } from "../../common/logger";
 
 export class GetProjects implements IRequestHandler<GetProjectsRequest, GetProjectsResponse> {
   async HandleAsync(request: GetProjectsRequest): Promise<GetProjectsResponse> {
-    Logger.info("GetProjects: Handling request");
+    Logger.info("GetProjects.HandleAsync: Handling request");
     let projectFiles = await vscode.workspace.findFiles(
       "**/*.{csproj,fsproj,vbproj}",
       "**/node_modules/**"
     );
 
-    Logger.info(`GetProjects: Found ${projectFiles.length} project files`);
+    Logger.info(`GetProjects.HandleAsync: Found ${projectFiles.length} project files`);
 
     let projects: Array<Project> = Array();
     projectFiles
@@ -24,8 +24,7 @@ export class GetProjects implements IRequestHandler<GetProjectsRequest, GetProje
           let project = ProjectParser.Parse(x, cpmVersions);
           projects.push(project);
         } catch (e) {
-          Logger.error(`GetProjects: Failed to parse project ${x}`, e);
-          console.error(e);
+          Logger.error(`GetProjects.HandleAsync: Failed to parse project ${x}`, e);
         }
       });
     let compareName = (nameA: string, nameB: string) => {
