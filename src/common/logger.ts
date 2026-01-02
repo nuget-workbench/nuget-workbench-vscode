@@ -79,7 +79,7 @@ export class Logger {
         this.log('ERROR', message, ...args);
     }
 
-    public static sendEvent(name: string, data?: Attributes, startTime?: TimeInput, endTime?: TimeInput): void {
+    private static sendEvent(name: string, data?: Attributes, startTime?: TimeInput, endTime?: TimeInput): void {
         if (!this._isEnabled || !this._tracer) return;
 
         const span = this._tracer.startSpan(name, {

@@ -31,14 +31,13 @@ export function activate(context: vscode.ExtensionContext) {
   Logger.configure(context);
   Logger.info("Extension activated");
   const provider = new NugetViewProvider(context.extensionUri);
-  Logger.sendEvent("activated");
 
   let previousVersion: string | undefined = context.globalState.get("NugetGallery.version");
   context.globalState.update("NugetGallery.version", context.extension.packageJSON.version);
   if (previousVersion == undefined) {
-    Logger.sendEvent("installed");
+    Logger.info("Extension installed");
   } else if (previousVersion != context.extension.packageJSON.version)
-    Logger.sendEvent("upgraded", { fromVersion: previousVersion });
+    Logger.info("Extension upgraded from version %s", previousVersion);
 
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider("nuget.gallery.view", provider, {
