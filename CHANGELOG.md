@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Inline information about newer package versions in project files (configurable via `NugetGallery.enablePackageVersionInlineInfo`)
 - 'All' option in source dropdown to search and fetch packages from all configured sources simultaneously
 - Support for Central Package Management (CPM)
   - Automatically detects and resolves package versions from `Directory.Packages.props`

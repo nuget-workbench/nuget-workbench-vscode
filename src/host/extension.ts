@@ -24,6 +24,7 @@ import OpenUrl from "./handlers/open-url";
 import { GetPackageDetails } from "./handlers/get-package-details";
 import { GetPackage } from "./handlers/get-package";
 import { Logger } from "../common/logger";
+import { PackageVersionDecorator } from "./utilities/package-version-decorator";
 
 let mediator: IMediator;
 
@@ -31,6 +32,8 @@ export function activate(context: vscode.ExtensionContext) {
   Logger.configure(context);
   Logger.info("Extension.activate: Extension activated");
   const provider = new NugetViewProvider(context.extensionUri);
+
+  context.subscriptions.push(new PackageVersionDecorator());
 
   let previousVersion: string | undefined = context.globalState.get("NugetGallery.version");
   context.globalState.update("NugetGallery.version", context.extension.packageJSON.version);

@@ -37,6 +37,18 @@ const template = html<SettingsView>`
         </vscode-checkbox>
       </div>
 
+      <div class="section">
+        <div class="title">Show inline information about newer package versions in project files</div>
+        <vscode-checkbox
+          :checked=${(x) => x.enablePackageVersionInlineInfo}
+          @change=${(x, c) => {
+            x.enablePackageVersionInlineInfo = (c.event.target! as HTMLInputElement).checked;
+            x.UpdateConfiguration();
+          }}
+        >
+        </vscode-checkbox>
+      </div>
+
       <div class="section sources-section">
         <div class="title">Sources</div>
         <div class="subtitle">NuGet sources</div>
@@ -207,6 +219,7 @@ export class SettingsView extends FASTElement {
   @Configuration configuration!: Configuration;
   @IMediator mediator!: IMediator;
   @observable skipRestore: boolean = false;
+  @observable enablePackageVersionInlineInfo: boolean = false;
   @observable newSource: SourceViewModel | null = null;
   @observable sources: Array<SourceViewModel> = [];
 
@@ -214,6 +227,7 @@ export class SettingsView extends FASTElement {
     super.connectedCallback();
     let config = this.configuration.Configuration;
     this.skipRestore = config?.SkipRestore ?? false;
+    this.enablePackageVersionInlineInfo = config?.EnablePackageVersionInlineInfo ?? false;
     this.sources = config?.Sources.map((x) => new SourceViewModel(x)) ?? [];
   }
 
@@ -223,6 +237,7 @@ export class SettingsView extends FASTElement {
       {
         Configuration: {
           SkipRestore: this.skipRestore,
+          EnablePackageVersionInlineInfo: this.enablePackageVersionInlineInfo,
           Sources: this.sources.map((x) => x.GetModel()),
         },
       }

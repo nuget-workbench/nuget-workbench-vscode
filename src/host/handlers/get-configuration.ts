@@ -46,6 +46,7 @@ export default class GetConfiguration implements IRequestHandler<GetConfiguratio
     let result: GetConfigurationResponse = {
       Configuration: {
         SkipRestore: config.get("skipRestore") ?? false,
+        EnablePackageVersionInlineInfo: config.get("enablePackageVersionInlineInfo") ?? false,
         Sources: sources,
       },
     };

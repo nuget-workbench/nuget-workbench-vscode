@@ -96,6 +96,11 @@
             "ERROR"
           ],
           "description": "Minimum logging level"
+        },
+        "NugetGallery.enablePackageVersionInlineInfo": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show inline information about newer package versions in project files"
         }
       }
     }

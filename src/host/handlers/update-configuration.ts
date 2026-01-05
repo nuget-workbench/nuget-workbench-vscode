@@ -17,6 +17,7 @@ export default class UpdateConfiguration
     );
 
     await config.update("skipRestore", request.Configuration.SkipRestore, vscode.ConfigurationTarget.Global);
+    await config.update("enablePackageVersionInlineInfo", request.Configuration.EnablePackageVersionInlineInfo, vscode.ConfigurationTarget.Global);
     await config.update("sources", sources, vscode.ConfigurationTarget.Global);
     Logger.info("UpdateConfiguration.HandleAsync: Configuration updated successfully");
     return {};

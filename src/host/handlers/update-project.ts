@@ -3,6 +3,7 @@ import * as vscode from "vscode";
 import ProjectParser from "../utilities/project-parser";
 import TaskExecutor from "../utilities/task-executor";
 import CpmResolver from "../utilities/cpm-resolver";
+import nugetApiFactory from "../nuget/api-factory";
 import { Logger } from "../../common/logger";
 
 export default class UpdateProject implements IRequestHandler<UpdateProjectRequest, UpdateProjectResponse> {
@@ -24,6 +25,7 @@ export default class UpdateProject implements IRequestHandler<UpdateProjectReque
     }
 
     CpmResolver.ClearCache();
+    nugetApiFactory.ClearCache();
 
     const cpmVersions = CpmResolver.GetPackageVersions(request.ProjectPath);
     let updatedProject = ProjectParser.Parse(request.ProjectPath, cpmVersions);

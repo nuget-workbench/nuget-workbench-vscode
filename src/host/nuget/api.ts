@@ -20,6 +20,8 @@ export default class NuGetApi {
   private _searchUrl: string = "";
   private _packageInfoUrl: string = "";
   private http: AxiosInstance;
+  private _packageCache: Map<string, { data: Package, timestamp: number }> = new Map();
+  private readonly _cacheTtl: number = 5 * 60 * 1000; // 5 minutes
 
   constructor(
     private readonly _url: string,
@@ -82,6 +84,13 @@ export default class NuGetApi {
   }
 
   async GetPackageAsync(id: string): Promise<GetPackageResponse> {
+    const cacheKey = id.toLowerCase();
+    const cached = this._packageCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp < this._cacheTtl)) {
+      Logger.debug(`NuGetApi.GetPackageAsync: Returning cached package info for ${id}`);
+      return { data: cached.data, isError: false, errorMessage: undefined };
+    }
+
     Logger.debug(`NuGetApi.GetPackageAsync: Fetching package info for ${id}`);
     await this.EnsureSearchUrl();
     let url = new URL([id.toLowerCase(), "index.json"].join("/"), this._packageInfoUrl).href;
@@ -137,7 +146,18 @@ export default class NuGetApi {
         })) || [],
       Tags: catalogEntry?.tags || [],
     };
+
+    this._packageCache.set(cacheKey, { data: packageObject, timestamp: Date.now() });
+
     return { data: packageObject, isError: false, errorMessage: undefined };
+  }
+
+  public ClearPackageCache(packageId?: string) {
+    if (packageId) {
+      this._packageCache.delete(packageId.toLowerCase());
+    } else {
+      this._packageCache.clear();
+    }
   }
 
   async GetPackageDetailsAsync(packageVersionUrl: string): Promise<GetPackageDetailsResponse> {

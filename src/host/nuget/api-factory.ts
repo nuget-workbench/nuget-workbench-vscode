@@ -38,6 +38,7 @@ class NuGetApiFactory {
 
   public ClearCache() {
     for (const key in this._sourceApiCollection) {
+      this._sourceApiCollection[key].ClearPackageCache();
       delete this._sourceApiCollection[key];
     }
     PasswordScriptExecutor.ClearCache();
