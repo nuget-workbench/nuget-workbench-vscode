@@ -13,7 +13,8 @@ import codicon from "@/web/styles/codicon.css";
 
 const template = html<PackageRow>`
 <div class="package-row ${(x) =>
-  x.package.Selected ? "package-row-selected" : ""}">
+  x.package.Selected ? "package-row-selected" : ""} ${(x) =>
+  x.package.Status === "Error" ? "package-row-error" : ""}">
     <div class="package-title">
     <img class="icon" src=${(x) => x.IconUrl} @error="${(x) =>
   (x.iconUrl =
@@ -36,15 +37,22 @@ const template = html<PackageRow>`
           (x) => x.package.Status == "MissingDetails",
           html<PackageRow>`<vscode-progress-ring
             class="loader"
-          ></vscode-progress-ring>`,
-          html<PackageRow>`${when(
-            (x) =>
-              x.package.Status == "Detailed" &&
-              x.package.Version != x.package.InstalledVersion,
-            html<PackageRow>`<span
-              class="codicon codicon-arrow-circle-up"
-            ></span>`
-          )}`
+          ></vscode-progress-ring>`
+        )}
+        ${when(
+          (x) => x.package.Status == "Error",
+          html<PackageRow>`<span
+            class="codicon codicon-error"
+            title="Failed to fetch package information"
+          ></span>`
+        )}
+        ${when(
+          (x) =>
+            x.package.Status == "Detailed" &&
+            x.package.Version != x.package.InstalledVersion,
+          html<PackageRow>`<span
+            class="codicon codicon-arrow-circle-up"
+          ></span>`
         )}
       `,
       html<PackageRow>`${(x) => x.package.Version}`
@@ -64,6 +72,13 @@ const styles = css`
 
     &.package-row-selected {
       background-color: var(--vscode-list-inactiveSelectionBackground);
+    }
+
+    &.package-row-error {
+      .name,
+      .package-version {
+        color: var(--vscode-errorForeground);
+      }
     }
 
     &:hover {
