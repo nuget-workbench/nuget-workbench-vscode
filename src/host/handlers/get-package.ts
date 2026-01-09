@@ -1,4 +1,5 @@
 import { IRequestHandler } from "@/common/messaging/core/types";
+import { GetPackageRequest, GetPackageResponse } from "../../common/messaging/get-package";
 import nugetApiFactory from "../nuget/api-factory";
 import * as vscode from "vscode";
 import { Logger } from "../../common/logger";

@@ -1,4 +1,4 @@
-type GetPackageRequest = {
+export type GetPackageRequest = {
   Url: string;
   SourceName?: string;
   Id: string;
@@ -7,7 +7,7 @@ type GetPackageRequest = {
   ForceReload?: boolean;
 };
 
-type GetPackageResponse = {
+export type GetPackageResponse = {
   IsFailure: boolean;
   Package?: Package;
   SourceUrl?: string;

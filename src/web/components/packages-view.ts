@@ -23,6 +23,10 @@ import {
   UpdateStatusBarRequest,
   UpdateStatusBarResponse,
 } from "@/common/messaging/update-status-bar";
+import {
+  GetPackageRequest,
+  GetPackageResponse,
+} from "@/common/messaging/get-package";
 import codicon from "@/web/styles/codicon.css";
 import { scrollableBase } from "@/web/styles/base.css";
 import { PackageViewModel, ProjectViewModel } from "../types";

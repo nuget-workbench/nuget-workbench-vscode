@@ -5,28 +5,7 @@ import { GetPackage } from '../../../../host/handlers/get-package';
 import nugetApiFactory from '../../../../host/nuget/api-factory';
 import NuGetConfigResolver from '../../../../host/utilities/nuget-config-resolver';
 import { Logger } from '../../../../common/logger';
-
-// Re-define types locally since they are not exported from common/messaging
-// Based on src/common/messaging/get-package.ts
-type GetPackageRequest = {
-  Url: string;
-  SourceName?: string;
-  Id: string;
-  Prerelease: boolean;
-  PasswordScriptPath?: string;
-  ForceReload?: boolean;
-};
-
-type HttpError = {
-  Message: string;
-};
-
-type GetPackageResponse = {
-  IsFailure: boolean;
-  Package?: any; // Using any for Package structure to simplify mocking
-  SourceUrl?: string;
-  Error?: HttpError;
-};
+import { GetPackageRequest, GetPackageResponse } from '../../../../common/messaging/get-package';
 
 suite('GetPackage Handler Tests', () => {
     let sandbox: sinon.SinonSandbox;
