@@ -5,6 +5,7 @@ import TaskExecutor from "../utilities/task-executor";
 import CpmResolver from "../utilities/cpm-resolver";
 import nugetApiFactory from "../nuget/api-factory";
 import { Logger } from "../../common/logger";
+import StatusBarUtils from "../utilities/status-bar-utils";
 
 export default class UpdateProject implements IRequestHandler<UpdateProjectRequest, UpdateProjectResponse> {
   async HandleAsync(request: UpdateProjectRequest): Promise<UpdateProjectResponse> {
@@ -14,14 +15,18 @@ export default class UpdateProject implements IRequestHandler<UpdateProjectReque
 
     // Don't use --no-restore with CPM as it causes version to be added to csproj
     const skipRestore: boolean = !!skipRestoreConfiguration && !isCpmEnabled;
-    
-    if (request.Type === "UPDATE") {
-      await this.RemovePackage(request);
-      await this.AddPackage(request, skipRestore, request.SourceUrl);
-    } else if (request.Type === "UNINSTALL") {
-      await this.RemovePackage(request);
-    } else {
-      await this.AddPackage(request, skipRestore, request.SourceUrl);
+
+    try {
+      if (request.Type === "UPDATE") {
+        await this.RemovePackage(request);
+        await this.AddPackage(request, skipRestore, request.SourceUrl);
+      } else if (request.Type === "UNINSTALL") {
+        await this.RemovePackage(request);
+      } else {
+        await this.AddPackage(request, skipRestore, request.SourceUrl);
+      }
+    } finally {
+      StatusBarUtils.hide();
     }
 
     CpmResolver.ClearCache();
@@ -38,6 +43,7 @@ export default class UpdateProject implements IRequestHandler<UpdateProjectReque
 
   // REMOVE: .NET 10 format: dotnet package remove <PACKAGE_ID> --project <PROJECT>
   private async RemovePackage(request: UpdateProjectRequest): Promise<void> {
+    StatusBarUtils.ShowText(`Removing package ${request.PackageId}...`);
     Logger.info(`UpdateProject.RemovePackage: Removing package ${request.PackageId}`);
     const args: Array<string> = ["package", "remove", request.PackageId, "--project", request.ProjectPath.replace(/\\/g, "/")];
     Logger.debug(`UpdateProject.RemovePackage: Executing: dotnet ${args.join(" ")}`);
@@ -54,6 +60,7 @@ export default class UpdateProject implements IRequestHandler<UpdateProjectReque
 
   // INSTALL: .NET 10 format: dotnet package add <PACKAGE_ID> --project <PROJECT> --version <VERSION>
   private async AddPackage(request: UpdateProjectRequest, skipRestore: boolean, sourceUrl?: string): Promise<void> {
+    StatusBarUtils.ShowText(`Installing package ${request.PackageId} ${request.Version || 'latest'}...`);
     Logger.info(`UpdateProject.AddPackage: Adding package ${request.PackageId} version ${request.Version || 'latest'}`);
     const args: Array<string> = ["package", "add", request.PackageId, "--project", request.ProjectPath.replace(/\\/g, "/")];
     if (request.Version) {
