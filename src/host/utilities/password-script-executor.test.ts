@@ -3,8 +3,8 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import { EventEmitter } from 'events';
-import PasswordScriptExecutor from '../../../../host/utilities/password-script-executor';
-import { Logger } from '../../../../common/logger';
+import PasswordScriptExecutor from './password-script-executor';
+import { Logger } from '../../common/logger';
 
 suite('PasswordScriptExecutor Tests', () => {
     let sandbox: sinon.SinonSandbox;

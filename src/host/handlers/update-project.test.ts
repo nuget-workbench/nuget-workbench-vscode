@@ -1,12 +1,12 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import UpdateProject from '../../../../host/handlers/update-project';
-import TaskExecutor from '../../../../host/utilities/task-executor';
-import ProjectParser from '../../../../host/utilities/project-parser';
-import CpmResolver from '../../../../host/utilities/cpm-resolver';
-import nugetApiFactory from '../../../../host/nuget/api-factory';
-import { Logger } from '../../../../common/logger';
+import UpdateProject from './update-project';
+import TaskExecutor from '../utilities/task-executor';
+import ProjectParser from '../utilities/project-parser';
+import CpmResolver from '../utilities/cpm-resolver';
+import nugetApiFactory from '../nuget/api-factory';
+import { Logger } from '../../common/logger';
 
 suite('UpdateProject Handler Tests', () => {
     let sandbox: sinon.SinonSandbox;

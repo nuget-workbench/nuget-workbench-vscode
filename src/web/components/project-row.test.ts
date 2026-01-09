@@ -1,4 +1,4 @@
-import '../../web-setup';
+import '../web-setup';
 import * as assert from 'assert';
 import { ProjectRow } from '@/web/components/project-row';
 import { ProjectViewModel, ProjectPackageViewModel } from '@/web/types';

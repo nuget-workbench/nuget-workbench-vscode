@@ -1,10 +1,10 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import { GetProjects } from '../../../../host/handlers/get-projects';
-import CpmResolver from '../../../../host/utilities/cpm-resolver';
-import ProjectParser from '../../../../host/utilities/project-parser';
-import { Logger } from '../../../../common/logger';
+import { GetProjects } from './get-projects';
+import CpmResolver from '../utilities/cpm-resolver';
+import ProjectParser from '../utilities/project-parser';
+import { Logger } from '../../common/logger';
 
 suite('GetProjects Handler Tests', () => {
     let sandbox: sinon.SinonSandbox;

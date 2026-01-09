@@ -1,9 +1,9 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import GetConfiguration from '../../../../host/handlers/get-configuration';
-import NuGetConfigResolver from '../../../../host/utilities/nuget-config-resolver';
-import { Logger } from '../../../../common/logger';
+import GetConfiguration from './get-configuration';
+import NuGetConfigResolver from '../utilities/nuget-config-resolver';
+import { Logger } from '../../common/logger';
 
 suite('GetConfiguration Handler Tests', () => {
     let sandbox: sinon.SinonSandbox;

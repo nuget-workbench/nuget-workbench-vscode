@@ -4,10 +4,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as vscode from 'vscode';
-import NuGetConfigResolver from '../../../../host/utilities/nuget-config-resolver';
-import PasswordScriptExecutor from '../../../../host/utilities/password-script-executor';
-import CredentialsCache from '../../../../host/utilities/credentials-cache';
-import { Logger } from '../../../../common/logger';
+import NuGetConfigResolver from './nuget-config-resolver';
+import PasswordScriptExecutor from './password-script-executor';
+import CredentialsCache from './credentials-cache';
+import { Logger } from '../../common/logger';
 
 suite('NuGetConfigResolver Tests', () => {
     let sandbox: sinon.SinonSandbox;

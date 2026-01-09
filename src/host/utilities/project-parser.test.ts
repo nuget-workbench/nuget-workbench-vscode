@@ -2,8 +2,8 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import ProjectParser from '../../../../host/utilities/project-parser';
-import { Logger } from '../../../../common/logger';
+import ProjectParser from './project-parser';
+import { Logger } from '../../common/logger';
 
 suite('ProjectParser Tests', () => {
     let tmpDir: string;

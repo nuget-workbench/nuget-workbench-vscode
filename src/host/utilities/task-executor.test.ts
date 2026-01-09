@@ -1,8 +1,8 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import { TaskExecutor } from '../../../../host/utilities/task-executor';
-import { Logger } from '../../../../common/logger';
+import { TaskExecutor } from './task-executor';
+import { Logger } from '../../common/logger';
 
 suite('TaskExecutor Tests', () => {
     let sandbox: sinon.SinonSandbox;

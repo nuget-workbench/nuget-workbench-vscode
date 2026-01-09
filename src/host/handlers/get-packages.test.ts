@@ -1,11 +1,11 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import { GetPackages } from '../../../../host/handlers/get-packages';
-import nugetApiFactory from '../../../../host/nuget/api-factory';
-import NuGetConfigResolver from '../../../../host/utilities/nuget-config-resolver';
-import StatusBarUtils from '../../../../host/utilities/status-bar-utils';
-import { Logger } from '../../../../common/logger';
+import { GetPackages } from './get-packages';
+import nugetApiFactory from '../nuget/api-factory';
+import NuGetConfigResolver from '../utilities/nuget-config-resolver';
+import StatusBarUtils from '../utilities/status-bar-utils';
+import { Logger } from '../../common/logger';
 
 suite('GetPackages Handler Tests', () => {
     let sandbox: sinon.SinonSandbox;

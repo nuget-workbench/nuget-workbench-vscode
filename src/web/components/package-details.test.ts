@@ -1,4 +1,4 @@
-import '../../web-setup';
+import '../web-setup';
 import * as assert from 'assert';
 import { PackageDetailsComponent } from '@/web/components/package-details';
 import { PackageViewModel } from '@/web/types';

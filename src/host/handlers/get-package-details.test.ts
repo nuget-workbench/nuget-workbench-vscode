@@ -1,9 +1,9 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import { GetPackageDetails } from '../../../../host/handlers/get-package-details';
-import nugetApiFactory from '../../../../host/nuget/api-factory';
-import { Logger } from '../../../../common/logger';
+import { GetPackageDetails } from './get-package-details';
+import nugetApiFactory from '../nuget/api-factory';
+import { Logger } from '../../common/logger';
 
 suite('GetPackageDetails Handler Tests', () => {
     let sandbox: sinon.SinonSandbox;

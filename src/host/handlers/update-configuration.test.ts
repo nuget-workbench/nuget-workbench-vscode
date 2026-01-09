@@ -1,9 +1,9 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
-import UpdateConfiguration from '../../../../host/handlers/update-configuration';
-import { Logger } from '../../../../common/logger';
-import { UpdateConfigurationRequest } from '../../../../common/messaging/update-configuration';
+import UpdateConfiguration from './update-configuration';
+import { Logger } from '../../common/logger';
+import { UpdateConfigurationRequest } from '../../common/messaging/update-configuration';
 
 suite('UpdateConfiguration Handler Tests', () => {
     let sandbox: sinon.SinonSandbox;

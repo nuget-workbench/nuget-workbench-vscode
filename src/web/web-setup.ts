@@ -13,7 +13,7 @@ const originalRequire = (Module as any).prototype.require;
 };
 
 // Register paths to point to 'out' directory
-const baseUrl = path.resolve(__dirname, '../../..'); // Repo root
+const baseUrl = path.resolve(__dirname, '../..'); // Repo root
 tsConfigPaths.register({
     baseUrl,
     paths: {

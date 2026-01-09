@@ -3,10 +3,10 @@ import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 import * as path from 'path';
-import { PackageVersionDecorator } from '../../../../host/utilities/package-version-decorator';
-import nugetApiFactory from '../../../../host/nuget/api-factory';
-import NuGetConfigResolver from '../../../../host/utilities/nuget-config-resolver';
-import { Logger } from '../../../../common/logger';
+import { PackageVersionDecorator } from './package-version-decorator';
+import nugetApiFactory from '../nuget/api-factory';
+import NuGetConfigResolver from './nuget-config-resolver';
+import { Logger } from '../../common/logger';
 
 suite('PackageVersionDecorator Tests', () => {
     let sandbox: sinon.SinonSandbox;

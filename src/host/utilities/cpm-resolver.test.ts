@@ -2,8 +2,8 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import CpmResolver from '../../../../host/utilities/cpm-resolver';
-import { Logger } from '../../../../common/logger';
+import CpmResolver from './cpm-resolver';
+import { Logger } from '../../common/logger';
 
 suite('CpmResolver Tests', () => {
     let tmpDir: string;

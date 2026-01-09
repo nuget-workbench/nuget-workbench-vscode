@@ -1,4 +1,4 @@
-import '../../web-setup';
+import '../web-setup';
 import * as assert from 'assert';
 import { ExpandableContainer } from '@/web/components/expandable-container';
 import { DOM } from '@microsoft/fast-element';

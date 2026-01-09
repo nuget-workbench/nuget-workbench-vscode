@@ -1,4 +1,4 @@
-import '../../web-setup'; // Must be first
+import '../web-setup'; // Must be first
 import * as assert from 'assert';
 import { SearchBar } from '@/web/components/search-bar';
 import { Configuration } from '@/web/registrations';
