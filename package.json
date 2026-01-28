@@ -1,8 +1,9 @@
 {
   "name": "vscode-nuget-gallery",
+  "publisher": "Shis",
   "displayName": "NuGet Gallery",
   "description": "The NuGet Gallery extension streamlines the process of installing and uninstalling NuGet packages, making it more efficient and user-friendly.",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "license": "MIT",
   "icon": "docs/images/icon.png",
   "engines": {

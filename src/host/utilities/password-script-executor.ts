@@ -82,6 +82,7 @@ class PasswordScriptTerminal implements vscode.Pseudoterminal {
 
 export default class PasswordScriptExecutor {
   private static cache: Map<string, { password: string; timestamp: number }> = new Map();
+  private static pendingExecutions: Map<string, Promise<string>> = new Map();
   private static readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   // START: Test Hook
@@ -96,11 +97,31 @@ export default class PasswordScriptExecutor {
 
     const cacheKey = `${scriptPath}:${encodedPassword}`;
     
+    // Check cache first
     const cached = this.cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS) {
       return cached.password;
     }
 
+    // Check if there's already a pending execution for this key
+    const pendingExecution = this.pendingExecutions.get(cacheKey);
+    if (pendingExecution) {
+      return pendingExecution;
+    }
+
+    // Create and store the pending execution promise
+    const executionPromise = this.executeScriptInternal(scriptPath, encodedPassword, cacheKey);
+    this.pendingExecutions.set(cacheKey, executionPromise);
+
+    try {
+      return await executionPromise;
+    } finally {
+      // Clean up the pending execution regardless of success/failure
+      this.pendingExecutions.delete(cacheKey);
+    }
+  }
+
+  private static async executeScriptInternal(scriptPath: string, encodedPassword: string, cacheKey: string): Promise<string> {
     try {
       const pty = new PasswordScriptTerminal(scriptPath, encodedPassword, this._spawn);
       
@@ -143,6 +164,7 @@ export default class PasswordScriptExecutor {
 
   static ClearCache(): void {
     this.cache.clear();
+    this.pendingExecutions.clear();
   }
 
   static ClearExpiredCache(): void {
