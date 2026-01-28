@@ -27,11 +27,11 @@ function createMockPackage(overrides: Partial<Package> = {}): Package {
 }
 
 // Helper to create mock Project data
-function createMockProject(name: string, packages: ProjectPackage[] = []): Project {
+function createMockProject(name: string, packages: (ProjectPackage | { Id: string, Version: string })[] = []): Project {
     return {
         Name: name,
         Path: `/path/to/${name}.csproj`,
-        Packages: packages
+        Packages: packages.map(p => ({ ...p, IsPinned: (p as ProjectPackage).IsPinned ?? false }))
     };
 }
 

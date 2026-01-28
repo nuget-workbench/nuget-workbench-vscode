@@ -32,7 +32,8 @@ const template = html<ProjectRow>`
               ${when(
                 (x) =>
                   x.ProjectPackage?.Version != x.packageVersion &&
-                  x.ProjectPackage?.Version != undefined,
+                  x.ProjectPackage?.Version != undefined &&
+                  !x.ProjectPackage?.IsPinned,
                 html<ProjectRow>`
                   <vscode-button appearance="icon">
                     <span

@@ -36,6 +36,7 @@ type PackageDependency = {
 type ProjectPackage = {
   Id: string;
   Version: string;
+  IsPinned: boolean;
 };
 
 type Project = {

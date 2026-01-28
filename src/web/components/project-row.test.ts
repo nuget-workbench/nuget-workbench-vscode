@@ -12,11 +12,11 @@ suite('ProjectRow Component', () => {
     let mockProject: ProjectViewModel;
 
     // Helper to create a mock ProjectViewModel
-    const createMockProject = (name: string, path: string, packages: { Id: string, Version: string }[]): ProjectViewModel => {
+    const createMockProject = (name: string, path: string, packages: { Id: string, Version: string, IsPinned?: boolean }[]): ProjectViewModel => {
         return new ProjectViewModel({
             Name: name,
             Path: path,
-            Packages: packages
+            Packages: packages.map(p => ({ ...p, IsPinned: p.IsPinned ?? false }))
         });
     };
 
@@ -146,9 +146,9 @@ suite('ProjectRow Component', () => {
                         Name: 'TestProject',
                         Path: 'path/to/project',
                         Packages: [
-                            { Id: 'TestPackage', Version: '1.0.0' },
-                            { Id: 'OtherPackage', Version: '2.0.0' },
-                            { Id: 'NewPackage', Version: '1.0.0' }
+                            { Id: 'TestPackage', Version: '1.0.0', IsPinned: false },
+                            { Id: 'OtherPackage', Version: '2.0.0', IsPinned: false },
+                            { Id: 'NewPackage', Version: '1.0.0', IsPinned: false }
                         ]
                     },
                     IsCpmEnabled: false
@@ -188,7 +188,7 @@ suite('ProjectRow Component', () => {
                         Name: 'TestProject',
                         Path: 'path/to/project',
                         Packages: [
-                            { Id: 'OtherPackage', Version: '2.0.0' }
+                            { Id: 'OtherPackage', Version: '2.0.0', IsPinned: false }
                         ]
                     },
                     IsCpmEnabled: false
@@ -226,8 +226,8 @@ suite('ProjectRow Component', () => {
                         Name: 'TestProject',
                         Path: 'path/to/project',
                         Packages: [
-                             { Id: 'TestPackage', Version: '1.1.0' }, // Updated
-                             { Id: 'OtherPackage', Version: '2.0.0' }
+                             { Id: 'TestPackage', Version: '1.1.0', IsPinned: false }, // Updated
+                             { Id: 'OtherPackage', Version: '2.0.0', IsPinned: false }
                         ]
                     },
                     IsCpmEnabled: false

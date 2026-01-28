@@ -74,9 +74,15 @@ export default class ProjectParser {
         }
       }
 
+      // Check if version is pinned (exact version match using [x.x.x] notation - no comma)
+      // According to NuGet versioning: [1.0] means x == 1.0 (exact version match, pinned)
+      // Ranges like [1.0,2.0], (1.0,), [1.0,) etc. are NOT pinned
+      const isPinned = version ? (version.startsWith('[') && version.endsWith(']') && !version.includes(',')) : false;
+
       let projectPackage: ProjectPackage = {
         Id: packageId,
         Version: version || "", // Ensure string
+        IsPinned: isPinned,
       };
       project.Packages.push(projectPackage);
     });

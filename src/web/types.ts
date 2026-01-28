@@ -21,6 +21,7 @@ export class PackageViewModel {
   @observable Status: PackageViewModelStatus;
   @observable Selected: boolean = false;
   @observable SourceUrl: string = "";
+  @observable AllowsUpdate: boolean = true;
 
   constructor(model: Package, status: PackageViewModelStatus = "Detailed") {
     this._authors = model.Authors;
@@ -95,10 +96,12 @@ export class ProjectViewModel {
 export class ProjectPackageViewModel {
   Id: string;
   Version: string;
+  IsPinned: boolean;
 
   constructor(model: ProjectPackage) {
     this.Id = model.Id;
     this.Version = model.Version;
+    this.IsPinned = model.IsPinned;
   }
 }
 

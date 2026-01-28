@@ -50,7 +50,8 @@ ${when((x) => x.package, html<PackageRow>`
         ${when(
           (x) =>
             x.package.Status == "Detailed" &&
-            x.package.Version != x.package.InstalledVersion,
+            x.package.Version != x.package.InstalledVersion &&
+            x.package.AllowsUpdate,
           html<PackageRow>`<span
             class="codicon codicon-arrow-circle-up"
           ></span>`

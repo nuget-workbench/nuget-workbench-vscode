@@ -442,35 +442,41 @@ export class PackagesView extends FASTElement {
         x.Id.toLowerCase().includes(this.filters.Query?.toLowerCase())
       );
 
-    const grouped = packages.reduce((acc: any, item) => {
-      const { Id, Version } = item;
+    // Group packages by Id and track versions and whether at least one is not pinned
+    const grouped = packages.reduce((acc: { [key: string]: { versions: string[], allowsUpdate: boolean } }, item) => {
+      const { Id, Version, IsPinned } = item;
 
       if (!acc[Id]) {
-        acc[Id] = [];
+        acc[Id] = { versions: [], allowsUpdate: false };
       }
 
-      if (acc[Id].indexOf(Version) < 0) {
-        acc[Id].push(Version);
+      if (acc[Id].versions.indexOf(Version) < 0) {
+        acc[Id].versions.push(Version);
+      }
+
+      // If at least one project has this package not pinned, allow updates
+      if (!IsPinned) {
+        acc[Id].allowsUpdate = true;
       }
 
       return acc;
     }, {});
 
     this.projectsPackages = Object.entries(grouped).map(
-      ([Id, Versions]) =>
-        new PackageViewModel(
+      ([Id, data]) => {
+        const pkg = new PackageViewModel(
           {
             Id: Id,
             Name: Id,
             IconUrl: "",
-            Versions: (Versions as Array<string>)?.map((x) => ({
+            Versions: data.versions.map((x) => ({
               Id: "",
               Version: x,
             })),
             InstalledVersion:
-              (Versions as Array<string>)?.length > 1
+              data.versions.length > 1
                 ? "Multiple"
-                : (Versions as Array<string>)?.[0] ?? "",
+                : data.versions[0] ?? "",
             Version: "",
             Description: "",
             LicenseUrl: "",
@@ -482,7 +488,10 @@ export class PackagesView extends FASTElement {
             Authors: [],
           },
           "MissingDetails"
-        )
+        );
+        pkg.AllowsUpdate = data.allowsUpdate;
+        return pkg;
+      }
     );
 
     const total = this.projectsPackages.length;
