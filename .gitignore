@@ -5,3 +5,4 @@ node_modules
 dist
 .env
 .claude/settings.local.json
+.playwright-mcp/page-2026-02-18T15-04-42-746Z.png

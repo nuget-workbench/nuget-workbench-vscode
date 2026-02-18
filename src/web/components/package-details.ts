@@ -1,143 +1,78 @@
-import {
-  ExecutionContext,
-  FASTElement,
-  attr,
-  css,
-  customElement,
-  html,
-  observable,
-  repeat,
-  volatile,
-  when,
-} from "@microsoft/fast-element";
+import { LitElement, css, html, nothing } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
+import type { PropertyValues } from "lit";
+import type { GetPackageDetailsRequest } from "@/common/rpc/types";
 import { PackageViewModel } from "../types";
 import codicon from "@/web/styles/codicon.css";
-import { IMediator } from "../registrations";
-import { GET_PACKAGE_DETAILS } from "@/common/messaging/core/commands";
+import { hostApi } from "../registrations";
 
-const template = html<PackageDetailsComponent>`
-  <expandable-container title="Info" summary=${(x) => x.package?.Description}>
-    <div class="package-details">
-      <span class="title">Author(s):</span>
-      <span>${(x) => x.package?.Authors}</span>
+@customElement("package-details")
+export class PackageDetailsComponent extends LitElement {
+  static styles = [
+    codicon,
+    css`
+      .title {
+      }
 
-      ${when(
-        (x) => x.package?.LicenseUrl,
-        html<PackageDetailsComponent>`
-          <span class="title">License:</span>
-          <vscode-link href=${(x) => x.package?.LicenseUrl}>View License</vscode-link>
-        `
-      )}
-      ${when(
-        (x) => x.package?.ProjectUrl,
-        html<PackageDetailsComponent>`
-          <span class="title">Project Url:</span>
-          <vscode-link href=${(x) => x.package?.ProjectUrl}>View Project</vscode-link>
-        `
-      )}
-      ${when(
-        (x) => x.package?.Tags,
-        html<PackageDetailsComponent>`
-          <span class="title">Tags:</span>
-          <span>${(x) => x.package?.Tags}</span>
-        `
-      )}
-    </div>
-  </expandable-container>
+      .loader {
+        margin: 0px auto;
+      }
 
-  <expandable-container title="Dependencies" expanded>
-    ${when(
-      (x) => x.packageDetailsLoading,
-      html<PackageDetailsComponent>`<vscode-progress-ring class="loader"></vscode-progress-ring>`,
-      html<PackageDetailsComponent>` <div class="dependencies">
-        ${when(
-          (x) => Object.keys(x.packageDetails?.dependencies?.frameworks || {}).length > 0,
-          html<PackageDetailsComponent>`
-            <ul>
-              ${repeat(
-                (x) => Object.keys(x.packageDetails?.dependencies?.frameworks || {}),
-                html<string>`
-                  <li>
-                    ${(x) => x}
-                    <ul>
-                      ${repeat(
-                        (x, y: ExecutionContext<PackageDetailsComponent, any>) =>
-                          y.parent.packageDetails?.dependencies?.frameworks[x] || [],
-                        html<PackageDependency>`<li>
-                          ${(x) => x.package} ${(x) => x.versionRange}
-                        </li>`
-                      )}
-                    </ul>
-                  </li>
-                `
-              )}
-            </ul>
-          `,
-          html<PackageDetailsComponent>`<div class="no-dependencies">
-            <span class="codicon codicon-info"></span>
-            <span> No dependencies</span>
-          </div>`
-        )}
-      </div>`
-    )}
-  </expandable-container>
-`;
-const styles = css`
-  .title {
-  }
+      .spinner {
+        display: inline-block;
+        border: 2px solid var(--vscode-progressBar-background);
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .spinner.large {
+        width: 20px;
+        height: 20px;
+      }
 
-  .loader {
-    margin: 0px auto;
-    width: 20px;
-    height: 20px;
-  }
+      .package-details {
+        margin-left: 4px;
+        display: grid;
+        gap: 4px 20px;
+        grid-template-columns: fit-content(100%) auto;
+      }
 
-  .package-details {
-    margin-left: 4px;
-    display: grid;
-    gap: 4px 20px;
-    grid-template-columns: fit-content(100%) auto;
-  }
+      .dependencies {
+        ul {
+          margin: 4px 0px;
+        }
+      }
 
-  .dependencies {
-    ul {
-      margin: 4px 0px;
+      .no-dependencies {
+        margin-left: 20px;
+        margin-top: 8px;
+        span {
+          vertical-align: middle;
+        }
+      }
+    `,
+  ];
+
+  @property({ attribute: false }) package: PackageViewModel | null = null;
+  @property() packageVersionUrl: string = "";
+  @property() source: string = "";
+  @property() passwordScriptPath?: string;
+
+  @state() packageDetailsLoading: boolean = false;
+  @state() packageDetails?: PackageDetails;
+
+  protected updated(changedProps: PropertyValues): void {
+    if (changedProps.has("source") || changedProps.has("packageVersionUrl")) {
+      this.reloadDependencies();
     }
   }
 
-  .no-dependencies {
-    margin-left: 20px;
-    margin-top: 8px;
-    span {
-      vertical-align: middle;
-    }
-  }
-`;
-
-@customElement({
-  name: "package-details",
-  template,
-  styles: [styles, codicon],
-})
-export class PackageDetailsComponent extends FASTElement {
-  @IMediator mediator!: IMediator;
-  @attr package: PackageViewModel | null = null;
-  @attr packageVersionUrl: string = "";
-  @attr source: string = "";
-  @attr passwordScriptPath?: string;
-
-  @observable packageDetailsLoading: boolean = false;
-  @observable packageDetails?: PackageDetails;
-
-  async sourceChanged(oldValue: string, newValue: string) {
-    this.ReloadDependencies();
-  }
-
-  async packageVersionUrlChanged(oldValue: string, newValue: string) {
-    this.ReloadDependencies();
-  }
-
-  private async ReloadDependencies() {
+  private async reloadDependencies(): Promise<void> {
     this.packageDetails = undefined;
 
     if (!this.source) return;
@@ -146,18 +81,92 @@ export class PackageDetailsComponent extends FASTElement {
 
     const request: GetPackageDetailsRequest = {
       PackageVersionUrl: this.packageVersionUrl,
-      SourceUrl: this.source,
+      Url: this.source,
       PasswordScriptPath: this.passwordScriptPath,
     };
 
-    const result = await this.mediator.PublishAsync<
-      GetPackageDetailsRequest,
-      GetPackageDetailsResponse
-    >(GET_PACKAGE_DETAILS, request);
+    const result = await hostApi.getPackageDetails(request);
 
-    if (request.PackageVersionUrl != this.packageVersionUrl) return;
+    if (request.PackageVersionUrl !== this.packageVersionUrl) return;
 
-    this.packageDetails = result.Package;
+    if (result.ok) {
+      this.packageDetails = result.value.Package;
+    }
     this.packageDetailsLoading = false;
+  }
+
+  private renderDependencies(): unknown {
+    if (this.packageDetailsLoading) {
+      return html`<span class="spinner large loader"></span>`;
+    }
+
+    const frameworks = this.packageDetails?.dependencies?.frameworks ?? {};
+    const frameworkKeys = Object.keys(frameworks);
+
+    if (frameworkKeys.length > 0) {
+      return html`
+        <div class="dependencies">
+          <ul>
+            ${frameworkKeys.map(
+              (fw) => html`
+                <li>
+                  ${fw}
+                  <ul>
+                    ${(frameworks[fw] ?? []).map(
+                      (dep) => html`<li>${dep.package} ${dep.versionRange}</li>`
+                    )}
+                  </ul>
+                </li>
+              `
+            )}
+          </ul>
+        </div>
+      `;
+    }
+
+    return html`
+      <div class="no-dependencies">
+        <span class="codicon codicon-info"></span>
+        <span> No dependencies</span>
+      </div>
+    `;
+  }
+
+  render(): unknown {
+    return html`
+      <expandable-container title="Info" summary=${this.package?.Description ?? ""}>
+        <div class="package-details">
+          <span class="title">Author(s):</span>
+          <span>${this.package?.Authors}</span>
+
+          ${this.package?.LicenseUrl
+            ? html`
+                <span class="title">License:</span>
+                <a href=${this.package.LicenseUrl} style="color: var(--vscode-textLink-foreground);"
+                  >View License</a
+                >
+              `
+            : nothing}
+          ${this.package?.ProjectUrl
+            ? html`
+                <span class="title">Project Url:</span>
+                <a href=${this.package.ProjectUrl} style="color: var(--vscode-textLink-foreground);"
+                  >View Project</a
+                >
+              `
+            : nothing}
+          ${this.package?.Tags
+            ? html`
+                <span class="title">Tags:</span>
+                <span>${this.package.Tags}</span>
+              `
+            : nothing}
+        </div>
+      </expandable-container>
+
+      <expandable-container title="Dependencies" expanded>
+        ${this.renderDependencies()}
+      </expandable-container>
+    `;
   }
 }

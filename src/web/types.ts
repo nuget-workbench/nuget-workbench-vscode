@@ -1,5 +1,4 @@
 import nonce from "@/common/nonce";
-import { observable } from "@microsoft/fast-element";
 
 type PackageViewModelStatus = "Detailed" | "MissingDetails" | "Error";
 
@@ -9,19 +8,19 @@ export class PackageViewModel {
   Model: Package;
   private _authors: Array<string>;
   private _tags: Array<string>;
-  @observable Description: string;
-  @observable IconUrl: string;
-  @observable LicenseUrl: string;
-  @observable ProjectUrl: string;
-  @observable TotalDownloads: number;
-  @observable Verified: boolean;
-  @observable InstalledVersion: string;
-  @observable Version: string;
-  @observable Versions: Array<string>;
-  @observable Status: PackageViewModelStatus;
-  @observable Selected: boolean = false;
-  @observable SourceUrl: string = "";
-  @observable AllowsUpdate: boolean = true;
+  Description: string;
+  IconUrl: string;
+  LicenseUrl: string;
+  ProjectUrl: string;
+  TotalDownloads: number;
+  Verified: boolean;
+  InstalledVersion: string;
+  Version: string;
+  Versions: Array<string>;
+  Status: PackageViewModelStatus;
+  Selected: boolean = false;
+  SourceUrl: string = "";
+  AllowsUpdate: boolean = true;
 
   constructor(model: Package, status: PackageViewModelStatus = "Detailed") {
     this._authors = model.Authors;
@@ -85,7 +84,7 @@ export class ProjectViewModel {
   Name: string;
   Path: string;
   CpmEnabled: boolean;
-  @observable Packages: ProjectPackageViewModel[];
+  Packages: ProjectPackageViewModel[];
 
   constructor(model: Project) {
     this.Name = model.Name;
@@ -116,8 +115,8 @@ export class OutdatedPackageViewModel {
   Projects: Array<{ Name: string; Path: string; Version: string }>;
   SourceUrl: string;
   SourceName: string;
-  @observable IsUpdating: boolean = false;
-  @observable Selected: boolean = false;
+  IsUpdating: boolean = false;
+  Selected: boolean = false;
 
   constructor(model: OutdatedPackage) {
     this.Id = model.Id;
@@ -134,8 +133,8 @@ export class InconsistentPackageViewModel {
   Versions: Array<{ Version: string; Projects: Array<{ Name: string; Path: string }> }>;
   LatestInstalledVersion: string;
   CpmManaged: boolean;
-  @observable TargetVersion: string;
-  @observable IsConsolidating: boolean = false;
+  TargetVersion: string;
+  IsConsolidating: boolean = false;
 
   constructor(model: InconsistentPackage) {
     this.Id = model.Id;
@@ -146,15 +145,42 @@ export class InconsistentPackageViewModel {
   }
 }
 
+export class VulnerablePackageViewModel {
+  Id: string;
+  InstalledVersion: string;
+  Severity: VulnerableSeverity;
+  SeverityLabel: string;
+  AdvisoryUrl: string;
+  AffectedVersionRange: string;
+  Projects: Array<{ Name: string; Path: string }>;
+
+  constructor(model: VulnerablePackage) {
+    this.Id = model.Id;
+    this.InstalledVersion = model.InstalledVersion;
+    this.Severity = model.Severity;
+    this.SeverityLabel = severityLabels[model.Severity];
+    this.AdvisoryUrl = model.AdvisoryUrl;
+    this.AffectedVersionRange = model.AffectedVersionRange;
+    this.Projects = model.Projects;
+  }
+}
+
+const severityLabels: Record<VulnerableSeverity, string> = {
+  0: "Low",
+  1: "Medium",
+  2: "High",
+  3: "Critical",
+};
+
 export class SourceViewModel {
   Id: number = 0;
-  @observable Name: string = "";
-  @observable Url: string = "";
-  @observable PasswordScriptPath: string = "";
-  @observable DraftName: string = "";
-  @observable DraftUrl: string = "";
-  @observable DraftPasswordScriptPath: string = "";
-  @observable EditMode: boolean = false;
+  Name: string = "";
+  Url: string = "";
+  PasswordScriptPath: string = "";
+  DraftName: string = "";
+  DraftUrl: string = "";
+  DraftPasswordScriptPath: string = "";
+  EditMode: boolean = false;
   Editable: boolean = true;
 
   constructor(model: Source | null = null) {

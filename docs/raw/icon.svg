@@ -1,0 +1,34 @@
+<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="50%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+    <clipPath id="clip">
+      <rect x="38" y="38" width="214" height="214" rx="66"/>
+    </clipPath>
+    <!-- Mask for small nut hole -->
+    <mask id="nutmask">
+      <rect width="256" height="256" fill="white"/>
+      <circle cx="24" cy="20" r="8" fill="black"/>
+    </mask>
+  </defs>
+
+  <!-- Small hex nut - OUTSIDE the box, top-left, hollow (ring shape) -->
+  <path d="M42.0,20.0 L33.0,35.6 L15.0,35.6 L6.0,20.0 L15.0,4.4 L33.0,4.4 Z"
+    fill="#a855f7" mask="url(#nutmask)"/>
+
+  <!-- Main rounded rectangle -->
+  <rect x="38" y="38" width="214" height="214" rx="66" fill="url(#bg)"/>
+
+  <g clip-path="url(#clip)">
+    <!-- Medium hex nut (upper-left inside box) -->
+    <path d="M146.0,102.0 L131.0,128.0 L101.0,128.0 L86.0,102.0 L101.0,76.0 L131.0,76.0 Z" fill="white" opacity="0.95"/>
+    <circle cx="116" cy="102" r="13" fill="url(#bg)"/>
+
+    <!-- Large hex nut (lower-right inside box) -->
+    <path d="M234.0,172.0 L212.0,210.1 L168.0,210.1 L146.0,172.0 L168.0,133.9 L212.0,133.9 Z" fill="white" opacity="0.92"/>
+    <circle cx="190" cy="172" r="20" fill="url(#bg)"/>
+  </g>
+</svg>

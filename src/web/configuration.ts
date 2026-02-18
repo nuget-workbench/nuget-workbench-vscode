@@ -1,27 +1,23 @@
-import { IMediator } from "./registrations";
-import { GET_CONFIGURATION } from "@/common/messaging/core/commands";
-import { Observable } from "@microsoft/fast-element";
+import type { HostAPI } from "@/common/rpc/types";
 
-export default class ConfigurationService {
-  private mediator: IMediator;
+export default class ConfigurationService extends EventTarget {
+  private hostApi: HostAPI;
   private configuration: Configuration | null = null;
 
-  constructor(mediator: IMediator) {
-    this.mediator = mediator;
+  constructor(hostApi: HostAPI) {
+    super();
+    this.hostApi = hostApi;
   }
 
-  get Configuration() {
-    Observable.track(this, "Configuration");
+  get Configuration(): Configuration | null {
     return this.configuration;
   }
 
   async Reload() {
-    const response = await this.mediator.PublishAsync<GetConfigurationRequest, GetConfigurationResponse>(
-      GET_CONFIGURATION,
-      {}
-    );
-
-    this.configuration = response.Configuration;
-    Observable.notify(this, "Configuration");
+    const result = await this.hostApi.getConfiguration();
+    if (result.ok) {
+      this.configuration = result.value.Configuration;
+    }
+    this.dispatchEvent(new Event("configuration-changed"));
   }
 }

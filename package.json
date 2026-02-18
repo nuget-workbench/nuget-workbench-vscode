@@ -1,36 +1,49 @@
 {
-  "name": "vscode-nuget-gallery",
+  "name": "nuget-workbench",
   "publisher": "daniel-rck",
-  "displayName": "NuGet Gallery",
-  "description": "The NuGet Gallery extension streamlines the process of installing and uninstalling NuGet packages, making it more efficient and user-friendly.",
-  "version": "2.0.1",
+  "displayName": "NuGet Workbench",
+  "description": "A comprehensive NuGet package management extension for Visual Studio Code with vulnerability scanning, multi-project support, and version consolidation.",
+  "version": "1.0.0",
   "license": "MIT",
   "icon": "docs/images/icon.png",
+  "galleryBanner": {
+    "color": "#6366f1",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.87.0"
   },
+  "keywords": [
+    "nuget",
+    "dotnet",
+    "package manager",
+    "csharp",
+    "fsharp",
+    "nuget gallery",
+    "vulnerability"
+  ],
   "categories": [
-    "Other"
+    "Programming Languages"
   ],
   "bugs": {
-    "url": "https://github.com/daniel-rck/vscode-nuget-gallery/issues",
+    "url": "https://github.com/daniel-rck/nuget-workbench/issues",
     "email": "daniel-rck@proton.me"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/daniel-rck/vscode-nuget-gallery.git"
+    "url": "https://github.com/daniel-rck/nuget-workbench.git"
   },
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "nuget-gallery.openSettings",
+        "command": "nuget-workbench.openSettings",
         "title": "Settings",
         "icon": "$(extensions-manage)"
       },
       {
-        "command": "nuget-gallery.reportProblem",
+        "command": "nuget-workbench.reportProblem",
         "title": "Report Problem",
         "icon": "$(report)"
       }
@@ -38,13 +51,13 @@
     "menus": {
       "view/title": [
         {
-          "command": "nuget-gallery.reportProblem",
-          "when": "view == nuget.gallery.view",
+          "command": "nuget-workbench.reportProblem",
+          "when": "view == nuget.workbench.view",
           "group": "navigation@1"
         },
         {
-          "command": "nuget-gallery.openSettings",
-          "when": "view == nuget.gallery.view",
+          "command": "nuget-workbench.openSettings",
+          "when": "view == nuget.workbench.view",
           "group": "navigation@2"
         }
       ]
@@ -52,30 +65,30 @@
     "viewsContainers": {
       "panel": [
         {
-          "id": "nugetGalleryView",
+          "id": "nugetWorkbenchView",
           "title": "NuGet",
           "icon": "resources/nuget.svg"
         }
       ]
     },
     "views": {
-      "nugetGalleryView": [
+      "nugetWorkbenchView": [
         {
           "type": "webview",
-          "id": "nuget.gallery.view",
+          "id": "nuget.workbench.view",
           "name": "NuGet"
         }
       ]
     },
     "configuration": {
-      "title": "NuGet Gallery",
+      "title": "NuGet Workbench",
       "properties": {
-        "NugetGallery.skipRestore": {
+        "NugetWorkbench.skipRestore": {
           "type": "boolean",
           "default": "false",
           "description": "Skip performing a restore preview and compatibility check"
         },
-        "NugetGallery.sources": {
+        "NugetWorkbench.sources": {
           "type": "array",
           "items": {
             "type": "string"
@@ -87,7 +100,7 @@
           ],
           "description": "NuGet sources"
         },
-        "NugetGallery.logLevel": {
+        "NugetWorkbench.logLevel": {
           "type": "string",
           "default": "INFO",
           "enum": [
@@ -98,17 +111,17 @@
           ],
           "description": "Minimum logging level"
         },
-        "NugetGallery.enablePackageVersionInlineInfo": {
+        "NugetWorkbench.enablePackageVersionInlineInfo": {
           "type": "boolean",
           "default": false,
           "description": "Show inline information about newer package versions in project files"
         },
-        "NugetGallery.prerelease": {
+        "NugetWorkbench.prerelease": {
           "type": "boolean",
           "default": false,
           "description": "Include prerelease versions when checking for package updates"
         },
-        "NugetGallery.statusBarLoadingIndicator": {
+        "NugetWorkbench.statusBarLoadingIndicator": {
           "type": "boolean",
           "default": false,
           "description": "Show a loading indicator in the status bar when loading packages"
@@ -148,13 +161,12 @@
     "typescript-eslint": "^8.56.0"
   },
   "dependencies": {
-    "@microsoft/fast-element": "^1.12.0",
     "@opentelemetry/api": "^1.8.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.51.1",
-    "@vscode/webview-ui-toolkit": "^1.4.0",
     "@xmldom/xmldom": "^0.8.10",
     "async-mutex": "^0.5.0",
     "axios": "^1.7.4",
+    "lit": "^3.3.2",
     "lodash": "^4.17.21",
     "object-hash": "^3.0.0",
     "split.js": "^1.6.5",

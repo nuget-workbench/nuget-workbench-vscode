@@ -1,43 +1,9 @@
-import { FASTElement, css, customElement, html, observable, repeat } from "@microsoft/fast-element";
-
+import { LitElement, css, html } from "lit";
+import { customElement, state } from "lit/decorators.js";
 import codicon from "@/web/styles/codicon.css";
-import { Configuration, IMediator } from "../registrations";
+import { configuration, hostApi } from "../registrations";
 import lodash from "lodash";
-import { UPDATE_CONFIGURATION } from "@/common/messaging/core/commands";
-import { UpdateConfigurationRequest, UpdateConfigurationResponse } from "@/common/messaging/update-configuration";
 
-const template = html<SearchBar>`
-  <div class="search-bar">
-    <div class="search-bar-left">
-      <vscode-text-field
-        class="search-text-field"
-        @input=${(x, c) => x.FilterInputEvent(c.event.target!)}
-      >
-        <span slot="start" class="codicon codicon-search"></span>
-      </vscode-text-field>
-      <vscode-button appearance="icon" @click=${(x) => x.ReloadClicked()}>
-        <span class="codicon codicon-refresh"></span>
-      </vscode-button>
-      <vscode-checkbox
-        :checked="${(x) => x.prerelase}"
-        @change=${(x, c) => x.PrerelaseChangedEvent(c.event.target!)}
-        >Prerelease</vscode-checkbox
-      >
-    </div>
-    <div class="search-bar-right">
-      <vscode-dropdown
-        :value=${(x) => x.selectedSourceUrl}
-        @change=${(x, c) => x.SelectSource((c.event.target as HTMLInputElement).value)}
-      >
-        <vscode-option :value="${(x) => ""}">All</vscode-option>
-        ${repeat(
-          (x) => x.configuration.Configuration!.Sources,
-          html<Source>` <vscode-option :value="${(x) => x.Url}">${(x) => x.Name}</vscode-option> `
-        )}
-      </vscode-dropdown>
-    </div>
-  </div>
-`;
 const styles = css`
   .search-bar {
     display: flex;
@@ -50,15 +16,50 @@ const styles = css`
       display: flex;
       align-items: center;
       gap: 6px;
-      .search-text-field {
+
+      .search-input {
         flex: 1;
         max-width: 340px;
         min-width: 140px;
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border);
+        padding: 4px 8px;
+        font-size: inherit;
+        font-family: inherit;
+      }
+
+      .icon-btn {
+        background: transparent;
+        border: none;
+        color: var(--vscode-icon-foreground);
+        cursor: pointer;
+        padding: 2px;
+        display: flex;
+        align-items: center;
+      }
+
+      .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        cursor: pointer;
+        white-space: nowrap;
       }
     }
+
     .search-bar-right {
       display: flex;
       gap: 10px;
+
+      select {
+        background: var(--vscode-dropdown-background);
+        color: var(--vscode-dropdown-foreground);
+        border: 1px solid var(--vscode-dropdown-border);
+        padding: 4px;
+        font-size: inherit;
+        font-family: inherit;
+      }
     }
   }
 `;
@@ -69,74 +70,120 @@ export type FilterEvent = {
   SourceUrl: string;
 };
 
-@customElement({
-  name: "search-bar",
-  template,
-  styles: [codicon, styles],
-})
-export class SearchBar extends FASTElement {
-  @Configuration configuration!: Configuration;
-  @IMediator mediator!: IMediator;
-  delayedPackagesLoader = lodash.debounce(() => this.EmitFilterChangedEvent(), 500);
-  @observable prerelase: boolean = false;
-  @observable filterQuery: string = "";
-  @observable selectedSourceUrl: string = "";
+@customElement("search-bar")
+export class SearchBar extends LitElement {
+  static styles = [codicon, styles];
+
+  private delayedPackagesLoader = lodash.debounce(() => this.emitFilterChangedEvent(), 500);
+  @state() prerelease: boolean = false;
+  @state() filterQuery: string = "";
+  @state() selectedSourceUrl: string = "";
 
   connectedCallback(): void {
     super.connectedCallback();
     this.selectedSourceUrl = "";
-    // Load prerelease from configuration
-    this.prerelase = this.configuration.Configuration?.Prerelease ?? false;
-    this.EmitFilterChangedEvent();
+    this.prerelease = configuration.Configuration?.Prerelease ?? false;
+    this.emitFilterChangedEvent();
   }
 
-  async PrerelaseChangedEvent(target: EventTarget) {
-    this.prerelase = (target as HTMLInputElement).checked;
-    // Save to configuration
-    await this.SavePrereleaseToConfiguration();
-    this.EmitFilterChangedEvent();
+  private async prereleaseChangedEvent(target: EventTarget): Promise<void> {
+    this.prerelease = (target as HTMLInputElement).checked;
+    await this.savePrereleaseToConfiguration();
+    this.emitFilterChangedEvent();
   }
 
-  private async SavePrereleaseToConfiguration() {
-    const config = this.configuration.Configuration;
+  private async savePrereleaseToConfiguration(): Promise<void> {
+    const config = configuration.Configuration;
     if (!config) return;
 
-    await this.mediator.PublishAsync<UpdateConfigurationRequest, UpdateConfigurationResponse>(
-      UPDATE_CONFIGURATION,
-      {
-        Configuration: {
-          SkipRestore: config.SkipRestore,
-          EnablePackageVersionInlineInfo: config.EnablePackageVersionInlineInfo,
-          Prerelease: this.prerelase,
-          Sources: config.Sources,
-          StatusBarLoadingIndicator: config.StatusBarLoadingIndicator,
-        },
-      }
-    );
-    await this.configuration.Reload();
+    await hostApi.updateConfiguration({
+      Configuration: {
+        SkipRestore: config.SkipRestore,
+        EnablePackageVersionInlineInfo: config.EnablePackageVersionInlineInfo,
+        Prerelease: this.prerelease,
+        Sources: config.Sources,
+        StatusBarLoadingIndicator: config.StatusBarLoadingIndicator,
+      },
+    });
+    await configuration.Reload();
   }
 
-  FilterInputEvent(target: EventTarget) {
+  private filterInputEvent(target: EventTarget): void {
     this.filterQuery = (target as HTMLInputElement).value;
     this.delayedPackagesLoader();
   }
 
-  SelectSource(url: string) {
+  private selectSource(url: string): void {
     this.selectedSourceUrl = url;
-    this.EmitFilterChangedEvent();
+    this.emitFilterChangedEvent();
   }
 
-  ReloadClicked() {
+  private reloadClicked(): void {
     const forceReload = true;
-    this.$emit("reload-invoked", forceReload);
+    this.dispatchEvent(
+      new CustomEvent("reload-invoked", {
+        detail: forceReload,
+        bubbles: true,
+        composed: true,
+      })
+    );
   }
 
-  EmitFilterChangedEvent() {
+  private emitFilterChangedEvent(): void {
     const filterEvent: FilterEvent = {
       Query: this.filterQuery,
-      Prerelease: this.prerelase,
+      Prerelease: this.prerelease,
       SourceUrl: this.selectedSourceUrl,
     };
-    this.$emit("filter-changed", filterEvent);
+    this.dispatchEvent(
+      new CustomEvent("filter-changed", {
+        detail: filterEvent,
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  render() {
+    const sources = configuration.Configuration?.Sources ?? [];
+
+    return html`
+      <div class="search-bar">
+        <div class="search-bar-left">
+          <input
+            type="text"
+            class="search-input"
+            placeholder="Search packages..."
+            aria-label="Search packages"
+            @input=${(e: Event) => this.filterInputEvent(e.target!)}
+          />
+          <button class="icon-btn" aria-label="Reload packages" title="Reload" @click=${() => this.reloadClicked()}>
+            <span class="codicon codicon-refresh"></span>
+          </button>
+          <label class="checkbox-label">
+            <input
+              type="checkbox"
+              .checked=${this.prerelease}
+              @change=${(e: Event) => this.prereleaseChangedEvent(e.target!)}
+            />
+            Prerelease
+          </label>
+        </div>
+        <div class="search-bar-right">
+          <select
+            aria-label="Package source"
+            .value=${this.selectedSourceUrl}
+            @change=${(e: Event) =>
+              this.selectSource((e.target as HTMLSelectElement).value)}
+          >
+            <option value="">All</option>
+            ${sources.map(
+              (source) =>
+                html`<option value=${source.Url}>${source.Name}</option>`
+            )}
+          </select>
+        </div>
+      </div>
+    `;
   }
 }

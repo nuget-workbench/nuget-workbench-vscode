@@ -82,6 +82,23 @@ type InconsistentPackage = {
   CpmManaged: boolean;
 };
 
+type VulnerableSeverity = 0 | 1 | 2 | 3; // Low | Medium | High | Critical
+
+type VulnerabilityEntry = {
+  url: string;
+  severity: VulnerableSeverity;
+  versions: string;
+};
+
+type VulnerablePackage = {
+  Id: string;
+  InstalledVersion: string;
+  Severity: VulnerableSeverity;
+  AdvisoryUrl: string;
+  AffectedVersionRange: string;
+  Projects: Array<{ Name: string; Path: string }>;
+};
+
 type HttpError = {
   Message: string;
 };

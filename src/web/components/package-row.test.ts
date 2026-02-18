@@ -2,7 +2,6 @@ import '../web-setup';
 import * as assert from 'assert';
 import { PackageRow } from '@/web/components/package-row';
 import { PackageViewModel } from '@/web/types';
-import { DOM } from '@microsoft/fast-element';
 
 // Mock types locally since we can't import hidden types easily or want to simplify
 function createPackageViewModel(overrides: any = {}): PackageViewModel {
@@ -64,7 +63,7 @@ suite('PackageRow Component', () => {
         packageRow.package = pkg;
         packageRow.showInstalledVersion = false;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         assert.ok(shadowRoot);
@@ -80,7 +79,7 @@ suite('PackageRow Component', () => {
         });
         packageRow.package = pkg;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         assert.ok(shadowRoot);
@@ -98,7 +97,7 @@ suite('PackageRow Component', () => {
         });
         packageRow.package = pkg;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         assert.ok(shadowRoot);
@@ -113,7 +112,7 @@ suite('PackageRow Component', () => {
         });
         packageRow.package = pkg;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         const img = shadowRoot?.querySelector('img.icon');
@@ -129,7 +128,7 @@ suite('PackageRow Component', () => {
         });
         packageRow.package = pkg;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         const img = shadowRoot?.querySelector('img.icon');
@@ -145,7 +144,7 @@ suite('PackageRow Component', () => {
         });
         packageRow.package = pkg;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         const img = shadowRoot?.querySelector('img.icon') as HTMLImageElement;
@@ -154,10 +153,10 @@ suite('PackageRow Component', () => {
         // Simulate error event
         img.dispatchEvent(new Event('error'));
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         assert.strictEqual(packageRow.iconUrl, 'https://nuget.org/Content/gallery/img/default-package-icon.svg');
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
         assert.strictEqual(img.getAttribute('src'), 'https://nuget.org/Content/gallery/img/default-package-icon.svg');
     });
 
@@ -168,7 +167,7 @@ suite('PackageRow Component', () => {
         packageRow.package = pkg;
         packageRow.showInstalledVersion = false;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         const versionDiv = shadowRoot?.querySelector('.package-version');
@@ -185,7 +184,7 @@ suite('PackageRow Component', () => {
         packageRow.package = pkg;
         packageRow.showInstalledVersion = true;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         const versionDiv = shadowRoot?.querySelector('.package-version');
@@ -203,7 +202,7 @@ suite('PackageRow Component', () => {
         packageRow.package = pkg;
         packageRow.showInstalledVersion = true;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         const arrow = shadowRoot?.querySelector('.codicon-arrow-circle-up');
@@ -219,7 +218,7 @@ suite('PackageRow Component', () => {
         packageRow.package = pkg;
         packageRow.showInstalledVersion = true;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         const arrow = shadowRoot?.querySelector('.codicon-arrow-circle-up');
@@ -234,10 +233,10 @@ suite('PackageRow Component', () => {
         packageRow.package = pkg;
         packageRow.showInstalledVersion = true;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
-        const loader = shadowRoot?.querySelector('vscode-progress-ring');
+        const loader = shadowRoot?.querySelector('.spinner');
         assert.ok(loader, 'Loader should be visible');
     });
 
@@ -249,7 +248,7 @@ suite('PackageRow Component', () => {
         packageRow.package = pkg;
         packageRow.showInstalledVersion = true;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         const errorIcon = shadowRoot?.querySelector('.codicon-error');
@@ -265,7 +264,7 @@ suite('PackageRow Component', () => {
         });
         packageRow.package = pkg;
 
-        await DOM.nextUpdate();
+        await packageRow.updateComplete;
 
         const shadowRoot = packageRow.shadowRoot;
         const row = shadowRoot?.querySelector('.package-row');

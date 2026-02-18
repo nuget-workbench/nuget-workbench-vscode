@@ -5,9 +5,9 @@ import * as path from "path";
 import { Logger } from "../../common/logger";
 
 export default class ProjectParser {
-  static Parse(projectPath: string, cpmVersions?: Map<string, string> | null): Project {
+  static async Parse(projectPath: string, cpmVersions?: Map<string, string> | null): Promise<Project> {
     Logger.debug(`ProjectParser.Parse: Parsing project: ${projectPath}`);
-    const projectContent = fs.readFileSync(projectPath, "utf8");
+    const projectContent = await fs.promises.readFile(projectPath, "utf8");
     const document = new DOMParser().parseFromString(projectContent);
 
     // Check for parsing errors or empty document

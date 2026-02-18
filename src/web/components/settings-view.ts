@@ -1,276 +1,308 @@
-import {
-  FASTElement,
-  customElement,
-  html,
-  css,
-  observable,
-  repeat,
-  when,
-  ExecutionContext,
-} from "@microsoft/fast-element";
+import { LitElement, css, html, nothing } from "lit";
+import { customElement, state } from "lit/decorators.js";
 
 import codicon from "@/web/styles/codicon.css";
 import { scrollableBase } from "@/web/styles/base.css";
-import { Configuration, IMediator, Router } from "../registrations";
+import { hostApi, configuration, router } from "../registrations";
 import { SourceViewModel } from "../types";
-import lodash from "lodash";
-import { UPDATE_CONFIGURATION } from "@/common/messaging/core/commands";
-import { UpdateConfigurationRequest, UpdateConfigurationResponse } from "@/common/messaging/update-configuration";
 
-const template = html<SettingsView>`
-  <div class="container">
-    <div class="header">
-      <vscode-button appearance="icon" @click=${(x) => x.router.Navigate("BROWSE")}>
-        <div class="return-btn"><span class="codicon codicon-arrow-left"></span>BACK</div>
-      </vscode-button>
-    </div>
-
-    <div class="sections-container">
-      <div class="section">
-        <div class="title">Skip performing a restore preview and compatibility check</div>
-        <vscode-checkbox
-          :checked=${(x) => x.skipRestore}
-          @change=${(x, c) => {
-            x.skipRestore = (c.event.target! as HTMLInputElement).checked;
-            x.UpdateConfiguration();
-          }}
-        >
-        </vscode-checkbox>
-      </div>
-
-      <div class="section">
-        <div class="title">Show inline information about newer package versions in project files</div>
-        <vscode-checkbox
-          :checked=${(x) => x.enablePackageVersionInlineInfo}
-          @change=${(x, c) => {
-            x.enablePackageVersionInlineInfo = (c.event.target! as HTMLInputElement).checked;
-            x.UpdateConfiguration();
-          }}
-        >
-        </vscode-checkbox>
-      </div>
-
-      <div class="section sources-section">
-        <div class="title">Sources</div>
-        <div class="subtitle">NuGet sources</div>
-        <div class="sources-editor">
-          ${repeat(
-            (x) => x.sources,
-            html<SourceViewModel>`
-              ${when(
-                (x) => x.EditMode,
-                html<SourceViewModel>`
-                  <div class="row edit-row">
-                    <vscode-text-field
-                      placeholder="Name"
-                      :value=${(x) => x.DraftName}
-                      @input=${(x, c) =>
-                        (x.DraftName = (c.event.target! as HTMLInputElement).value)}
-                    ></vscode-text-field>
-                    <vscode-text-field
-                      placeholder="Url"
-                      :value=${(x) => x.DraftUrl}
-                      @input=${(x, c) => (x.DraftUrl = (c.event.target! as HTMLInputElement).value)}
-                    ></vscode-text-field>
-                    <vscode-text-field
-                      placeholder="Password Script Path (optional)"
-                      :value=${(x) => x.DraftPasswordScriptPath}
-                      @input=${(x, c) => (x.DraftPasswordScriptPath = (c.event.target! as HTMLInputElement).value)}
-                    ></vscode-text-field>
-                    <div>
-                      <vscode-button
-                        @click=${(x, c: ExecutionContext<SettingsView, any>) => c.parent.SaveRow(x)}
-                      >
-                        Ok
-                      </vscode-button>
-                      <vscode-button
-                        appearance="secondary"
-                        @click=${(x, c: ExecutionContext<SettingsView, any>) =>
-                          c.parent.CancelRow(x)}
-                      >
-                        Cancel
-                      </vscode-button>
-                    </div>
-                  </div>
-                `,
-                html<SourceViewModel>`
-                  <div class="row data-row">
-                    <span class="label">${(x) => x.Name}</span>
-                    <span class="label">${(x) => x.Url}</span>
-                    <span class="label">${(x) => x.PasswordScriptPath}</span>
-                    <div class="actions">
-                      <vscode-button
-                        appearance="icon"
-                        @click=${(x, c: ExecutionContext<SettingsView, any>) => c.parent.EditRow(x)}
-                      >
-                        <span class="codicon codicon-edit"></span>
-                      </vscode-button>
-                      <vscode-button
-                        appearance="icon"
-                        @click=${(x, c: ExecutionContext<SettingsView, any>) =>
-                          c.parent.RemoveRow(x)}
-                      >
-                        <span class="codicon codicon-close"></span>
-                      </vscode-button>
-                    </div>
-                  </div>
-                `
-              )}
-            `
-          )}
-        </div>
-        ${when(
-          (x) => x.newSource == null,
-          html<SettingsView>`<vscode-button class="add-source" @click=${(x) => x.AddSourceRow()}>
-            Add source
-          </vscode-button>`
-        )}
-      </div>
-    </div>
-  </div>
-`;
-
-const styles = css`
-  .container {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    .header {
-      margin-bottom: 8px;
-      .return-btn {
+@customElement("settings-view")
+export class SettingsView extends LitElement {
+  static styles = [
+    codicon,
+    scrollableBase,
+    css`
+      .container {
         display: flex;
-        gap: 4px;
-        align-items: center;
-        span {
-          font: 17px / 1 codicon;
-        }
-      }
-    }
-    .sections-container {
-      width: 100%;
-      max-width: 700px;
-      align-self: center;
-      overflow-y: auto;
-
-      .section {
-        margin-right: 20px;
-        margin-bottom: 12px;
-
-        .text-field {
-          width: 100%;
-        }
-        .title {
-          font-weight: bold;
-          font-size: 13px;
-          margin-bottom: 6px;
-        }
-        .subtitle {
+        flex-direction: column;
+        height: 100%;
+        .header {
           margin-bottom: 8px;
-        }
-      }
-
-      .sources-section {
-        .sources-editor {
-          .row {
-            margin: 4px 0px;
-            display: grid;
-            grid-template-columns: 20% 35% 45%;
-            grid-column-gap: 10px;
-            &.data-row {
-              .actions {
-                display: none;
-              }
-              .label {
-                padding: 4px 2px;
-                text-wrap: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-              }
-              &:hover {
-                grid-template-columns: 20% 25% 30% 50px;
-                background-color: var(--vscode-list-hoverBackground);
-                &:not(:first-child) {
-                  .actions {
-                    display: flex;
-                    gap: 2px;
-                  }
-                }
-              }
-            }
-            &.edit-row {
-              grid-template-columns: 20% 25% 30% 108px;
+          .return-btn {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            span {
+              font: 17px / 1 codicon;
             }
           }
         }
-        .add-source {
-          margin: 6px 0px;
+        .sections-container {
+          width: 100%;
+          max-width: 700px;
+          align-self: center;
+          overflow-y: auto;
+
+          .section {
+            margin-right: 20px;
+            margin-bottom: 12px;
+
+            .text-field {
+              width: 100%;
+            }
+            .title {
+              font-weight: bold;
+              font-size: 13px;
+              margin-bottom: 6px;
+            }
+            .subtitle {
+              margin-bottom: 8px;
+            }
+          }
+
+          .sources-section {
+            .sources-editor {
+              .row {
+                margin: 4px 0px;
+                display: grid;
+                grid-template-columns: 20% 35% 45%;
+                grid-column-gap: 10px;
+                &.data-row {
+                  .actions {
+                    display: none;
+                  }
+                  .label {
+                    padding: 4px 2px;
+                    text-wrap: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                  }
+                  &:hover {
+                    grid-template-columns: 20% 25% 30% 50px;
+                    background-color: var(--vscode-list-hoverBackground);
+                    &:not(:first-child) {
+                      .actions {
+                        display: flex;
+                        gap: 2px;
+                      }
+                    }
+                  }
+                }
+                &.edit-row {
+                  grid-template-columns: 20% 25% 30% 108px;
+                }
+              }
+            }
+            .add-source {
+              margin: 6px 0px;
+            }
+          }
         }
       }
-    }
-  }
-`;
 
-@customElement({
-  name: "settings-view",
-  template,
-  styles: [codicon, scrollableBase, styles],
-})
-export class SettingsView extends FASTElement {
-  @Router router!: Router;
-  @Configuration configuration!: Configuration;
-  @IMediator mediator!: IMediator;
-  @observable skipRestore: boolean = false;
-  @observable enablePackageVersionInlineInfo: boolean = false;
-  @observable newSource: SourceViewModel | null = null;
-  @observable sources: Array<SourceViewModel> = [];
+      button {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        border: none;
+        padding: 4px 12px;
+        cursor: pointer;
+      }
+
+      button.icon-btn {
+        background: transparent;
+        border: none;
+        color: var(--vscode-icon-foreground);
+        cursor: pointer;
+        padding: 2px;
+      }
+
+      button.secondary-btn {
+        background: var(--vscode-button-secondaryBackground);
+        color: var(--vscode-button-secondaryForeground);
+      }
+
+      input[type="text"] {
+        background: var(--vscode-input-background);
+        color: var(--vscode-input-foreground);
+        border: 1px solid var(--vscode-input-border);
+        padding: 4px 8px;
+        width: 100%;
+        box-sizing: border-box;
+      }
+    `,
+  ];
+
+  @state() private skipRestore: boolean = false;
+  @state() private enablePackageVersionInlineInfo: boolean = false;
+  @state() private newSource: SourceViewModel | null = null;
+  @state() private sources: SourceViewModel[] = [];
 
   connectedCallback(): void {
     super.connectedCallback();
-    const config = this.configuration.Configuration;
+    const config = configuration.Configuration;
     this.skipRestore = config?.SkipRestore ?? false;
     this.enablePackageVersionInlineInfo = config?.EnablePackageVersionInlineInfo ?? false;
     this.sources = config?.Sources.map((x) => new SourceViewModel(x)) ?? [];
   }
 
-  async UpdateConfiguration() {
-    await this.mediator.PublishAsync<UpdateConfigurationRequest, UpdateConfigurationResponse>(
-      UPDATE_CONFIGURATION,
-      {
-        Configuration: {
-          SkipRestore: this.skipRestore,
-          EnablePackageVersionInlineInfo: this.enablePackageVersionInlineInfo,
-          Prerelease: this.configuration.Configuration?.Prerelease ?? false,
-          Sources: this.sources.map((x) => x.GetModel()),
-          StatusBarLoadingIndicator: this.configuration.Configuration?.StatusBarLoadingIndicator ?? false,
-        },
-      }
-    );
-    await this.configuration.Reload();
+  private async updateConfiguration(): Promise<void> {
+    await hostApi.updateConfiguration({
+      Configuration: {
+        SkipRestore: this.skipRestore,
+        EnablePackageVersionInlineInfo: this.enablePackageVersionInlineInfo,
+        Prerelease: configuration.Configuration?.Prerelease ?? false,
+        Sources: this.sources.map((x) => x.GetModel()),
+        StatusBarLoadingIndicator:
+          configuration.Configuration?.StatusBarLoadingIndicator ?? false,
+      },
+    });
+    await configuration.Reload();
   }
 
-  AddSourceRow() {
-    this.sources.filter((x) => x.EditMode == true).forEach((x) => x.Cancel());
+  private addSourceRow(): void {
+    this.sources.filter((x) => x.EditMode).forEach((x) => x.Cancel());
     this.newSource = new SourceViewModel();
     this.newSource.Edit();
-    this.sources.push(this.newSource);
+    this.sources = [...this.sources, this.newSource];
   }
-  EditRow(source: SourceViewModel) {
-    this.sources.filter((x) => x.EditMode == true).forEach((x) => x.Cancel());
+
+  private editRow(source: SourceViewModel): void {
+    this.sources.filter((x) => x.EditMode).forEach((x) => x.Cancel());
     source.Edit();
+    this.requestUpdate();
   }
-  RemoveRow(source: SourceViewModel) {
-    this.sources.splice(this.sources.indexOf(source), 1);
-    this.UpdateConfiguration();
+
+  private async removeRow(source: SourceViewModel): Promise<void> {
+    const confirm = await hostApi.showConfirmation({
+      Message: `Remove source "${source.Name}"?`,
+      Detail: `This will remove the NuGet source "${source.Name}" (${source.Url}).`,
+    });
+    if (!confirm.ok || !confirm.value.Confirmed) return;
+
+    this.sources = this.sources.filter((s) => s !== source);
+    this.updateConfiguration();
   }
-  SaveRow(source: SourceViewModel) {
-    if (this.newSource?.Id == source.Id) this.newSource = null;
+
+  private saveRow(source: SourceViewModel): void {
+    if (this.newSource?.Id === source.Id) this.newSource = null;
     source.Save();
-    if (source.Name == "" && source.Url == "") this.RemoveRow(source);
-    this.UpdateConfiguration();
+    if (source.Name === "" && source.Url === "") {
+      this.removeRow(source);
+      return;
+    }
+    this.requestUpdate();
+    this.updateConfiguration();
   }
-  CancelRow(source: SourceViewModel) {
-    if (this.newSource?.Id == source.Id) this.newSource = null;
-    if (source.Name == "" && source.Url == "") this.RemoveRow(source);
-    else source.Cancel();
+
+  private cancelRow(source: SourceViewModel): void {
+    if (this.newSource?.Id === source.Id) this.newSource = null;
+    if (source.Name === "" && source.Url === "") {
+      this.removeRow(source);
+    } else {
+      source.Cancel();
+      this.requestUpdate();
+    }
+  }
+
+  private renderSourceRow(source: SourceViewModel): unknown {
+    if (source.EditMode) {
+      return html`
+        <div class="row edit-row">
+          <input
+            type="text"
+            placeholder="Name"
+            .value=${source.DraftName}
+            @input=${(e: Event) => {
+              source.DraftName = (e.target as HTMLInputElement).value;
+            }}
+          />
+          <input
+            type="text"
+            placeholder="Url"
+            .value=${source.DraftUrl}
+            @input=${(e: Event) => {
+              source.DraftUrl = (e.target as HTMLInputElement).value;
+            }}
+          />
+          <input
+            type="text"
+            placeholder="Password Script Path (optional)"
+            .value=${source.DraftPasswordScriptPath}
+            @input=${(e: Event) => {
+              source.DraftPasswordScriptPath = (e.target as HTMLInputElement).value;
+            }}
+          />
+          <div>
+            <button @click=${() => this.saveRow(source)}>Ok</button>
+            <button class="secondary-btn" @click=${() => this.cancelRow(source)}>Cancel</button>
+          </div>
+        </div>
+      `;
+    }
+
+    return html`
+      <div class="row data-row">
+        <span class="label">${source.Name}</span>
+        <span class="label">${source.Url}</span>
+        <span class="label">${source.PasswordScriptPath}</span>
+        <div class="actions">
+          <button class="icon-btn" aria-label="Edit source" title="Edit" @click=${() => this.editRow(source)}>
+            <span class="codicon codicon-edit"></span>
+          </button>
+          <button class="icon-btn" aria-label="Remove source" title="Remove" @click=${() => this.removeRow(source)}>
+            <span class="codicon codicon-close"></span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  render(): unknown {
+    return html`
+      <div class="container">
+        <div class="header">
+          <button class="icon-btn" aria-label="Go back" @click=${() => router.Navigate("BROWSE")}>
+            <div class="return-btn">
+              <span class="codicon codicon-arrow-left"></span>BACK
+            </div>
+          </button>
+        </div>
+
+        <div class="sections-container">
+          <div class="section">
+            <label class="title">
+              <input
+                type="checkbox"
+                .checked=${this.skipRestore}
+                @change=${(e: Event) => {
+                  this.skipRestore = (e.target as HTMLInputElement).checked;
+                  this.updateConfiguration();
+                }}
+              />
+              Skip performing a restore preview and compatibility check
+            </label>
+          </div>
+
+          <div class="section">
+            <label class="title">
+              <input
+                type="checkbox"
+                .checked=${this.enablePackageVersionInlineInfo}
+                @change=${(e: Event) => {
+                  this.enablePackageVersionInlineInfo = (e.target as HTMLInputElement).checked;
+                  this.updateConfiguration();
+                }}
+              />
+              Show inline information about newer package versions in project files
+            </label>
+          </div>
+
+          <div class="section sources-section">
+            <div class="title">Sources</div>
+            <div class="subtitle">NuGet sources</div>
+            <div class="sources-editor">
+              ${this.sources.map((source) => this.renderSourceRow(source))}
+            </div>
+            ${this.newSource === null
+              ? html`
+                  <button class="add-source" aria-label="Add new source" @click=${() => this.addSourceRow()}>
+                    Add source
+                  </button>
+                `
+              : nothing}
+          </div>
+        </div>
+      </div>
+    `;
   }
 }

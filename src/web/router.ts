@@ -1,17 +1,14 @@
-import { Observable } from "@microsoft/fast-element";
-
 type Routes = "BROWSE" | "SETTINGS";
 
-export default class Router {
+export default class Router extends EventTarget {
   private route: Routes = "BROWSE";
 
-  get CurrentRoute() {
-    Observable.track(this, "CurrentRoute");
+  get CurrentRoute(): Routes {
     return this.route;
   }
 
   Navigate(route: Routes) {
     this.route = route;
-    Observable.notify(this, "CurrentRoute");
+    this.dispatchEvent(new Event("route-changed"));
   }
 }

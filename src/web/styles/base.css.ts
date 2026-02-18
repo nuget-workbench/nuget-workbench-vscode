@@ -1,4 +1,4 @@
-import { css } from "@microsoft/fast-element";
+import { css } from "lit";
 
 export const scrollableBase = css`
   ::-webkit-scrollbar {

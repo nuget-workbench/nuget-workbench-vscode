@@ -19,9 +19,12 @@ type GetPackageDetailsResponse = {
 export default class NuGetApi {
   private _searchUrl: string = "";
   private _packageInfoUrl: string = "";
+  private _vulnerabilityUrl: string = "";
   private http: AxiosInstance;
   private _packageCache: Map<string, { data: Package, timestamp: number }> = new Map();
+  private _vulnerabilityCache: { data: Map<string, VulnerabilityEntry[]>, timestamp: number } | null = null;
   private readonly _cacheTtl: number = 5 * 60 * 1000; // 5 minutes
+  private readonly _vulnCacheTtl: number = 60 * 60 * 1000; // 1 hour
 
   constructor(
     private readonly _url: string,
@@ -84,7 +87,7 @@ export default class NuGetApi {
   }
 
   async GetPackageAsync(id: string, prerelease: boolean = true): Promise<GetPackageResponse> {
-    const cacheKey = `${id.toLowerCase()}_${prerelease}`;
+    const cacheKey = `${id.toLowerCase()}::${prerelease}`;
     const cached = this._packageCache.get(cacheKey);
     if (cached && (Date.now() - cached.timestamp < this._cacheTtl)) {
       Logger.debug(`NuGetApi.GetPackageAsync: Returning cached package info for ${id} (prerelease: ${prerelease})`);
@@ -131,9 +134,9 @@ export default class NuGetApi {
       ? items 
       : items.filter((v: any) => !v.catalogEntry?.version?.includes('-'));
     
-    if (filteredItems.length <= 0) {
+    if (!prerelease && filteredItems.length <= 0) {
       // If no stable versions found, fall back to all versions
-      Logger.debug(`NuGetApi.GetPackageAsync: No stable versions found for ${id}, returning all versions`);
+      Logger.warn(`NuGetApi.GetPackageAsync: No stable versions found for ${id}, falling back to all versions including prerelease`);
     }
     
     const itemsToUse = filteredItems.length > 0 ? filteredItems : items;
@@ -248,6 +251,47 @@ export default class NuGetApi {
     }
   }
 
+  async GetVulnerabilitiesAsync(): Promise<Map<string, VulnerabilityEntry[]>> {
+    // Return cached data if fresh
+    if (this._vulnerabilityCache && (Date.now() - this._vulnerabilityCache.timestamp < this._vulnCacheTtl)) {
+      Logger.debug("NuGetApi.GetVulnerabilitiesAsync: Returning cached vulnerability data");
+      return this._vulnerabilityCache.data;
+    }
+
+    Logger.debug("NuGetApi.GetVulnerabilitiesAsync: Fetching vulnerability data");
+    await this.EnsureSearchUrl();
+
+    if (!this._vulnerabilityUrl) {
+      Logger.debug("NuGetApi.GetVulnerabilitiesAsync: No vulnerability endpoint available");
+      return new Map();
+    }
+
+    const vulnerabilities = new Map<string, VulnerabilityEntry[]>();
+
+    try {
+      const indexResponse = await this.ExecuteGet(this._vulnerabilityUrl);
+      const pages: Array<{ "@name": string; "@id": string; "@updated": string }> = indexResponse.data;
+
+      for (const page of pages) {
+        const pageResponse = await this.ExecuteGet(page["@id"]);
+        const data: Record<string, VulnerabilityEntry[]> = pageResponse.data;
+
+        for (const [packageId, entries] of Object.entries(data)) {
+          const existing = vulnerabilities.get(packageId) ?? [];
+          existing.push(...entries);
+          vulnerabilities.set(packageId, existing);
+        }
+      }
+
+      Logger.info(`NuGetApi.GetVulnerabilitiesAsync: Loaded vulnerabilities for ${vulnerabilities.size} packages`);
+    } catch (err) {
+      Logger.error("NuGetApi.GetVulnerabilitiesAsync: Failed to fetch vulnerabilities", err);
+    }
+
+    this._vulnerabilityCache = { data: vulnerabilities, timestamp: Date.now() };
+    return vulnerabilities;
+  }
+
   private async EnsureSearchUrl() {
     if (this._searchUrl !== "" && this._packageInfoUrl !== "") return;
 
@@ -261,7 +305,12 @@ export default class NuGetApi {
     if (this._packageInfoUrl == "") throw { message: "RegistrationsBaseUrl couldn't be found" };
     if (!this._packageInfoUrl.endsWith("/")) this._packageInfoUrl += "/";
 
-    Logger.debug(`NuGetApi.EnsureSearchUrl: SearchUrl=${this._searchUrl}, PackageInfoUrl=${this._packageInfoUrl}`);
+    // Vulnerability endpoint is optional (not all feeds support it)
+    if (!this._vulnerabilityUrl) {
+      this._vulnerabilityUrl = await this.GetUrlFromNugetDefinition(response, "VulnerabilityInfo");
+    }
+
+    Logger.debug(`NuGetApi.EnsureSearchUrl: SearchUrl=${this._searchUrl}, PackageInfoUrl=${this._packageInfoUrl}, VulnerabilityUrl=${this._vulnerabilityUrl}`);
   }
 
   private async GetUrlFromNugetDefinition(response: any, type: string): Promise<string> {

@@ -1,29 +1,7 @@
-import {
-  FASTElement,
-  attr,
-  css,
-  customElement,
-  html,
-  observable,
-  when,
-} from "@microsoft/fast-element";
+import { LitElement, css, html, nothing } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
 import codicon from "@/web/styles/codicon.css";
 
-const template = html<ExpandableContainer>`
-  <div
-    class="expandable ${(x) => (!x.isExpanded ? "collapsed" : "")}"
-    @click=${(x) => (x.isExpanded = !x.isExpanded)}
-  >
-    <div class="title">
-      <span
-        class="codicon ${(x) => (x.isExpanded ? "codicon-chevron-down" : "codicon-chevron-right")}"
-      ></span>
-      <span>${(x) => x.title}</span>
-    </div>
-    <span class="summary">${(x) => x.summary}</span>
-  </div>
-  <div class="content">${when((x) => x.isExpanded, html<ExpandableContainer>`<slot></slot>`)}</div>
-`;
 const styles = css`
   .expandable {
     display: grid;
@@ -59,19 +37,37 @@ const styles = css`
   }
 `;
 
-@customElement({
-  name: "expandable-container",
-  template,
-  styles: [styles, codicon],
-})
-export class ExpandableContainer extends FASTElement {
-  @attr title: string = "";
-  @attr summary: string = "";
-  @attr({ mode: 'boolean' }) expanded: boolean = false;
-  @observable isExpanded: boolean = false;
+@customElement("expandable-container")
+export class ExpandableContainer extends LitElement {
+  static styles = [styles, codicon];
 
-  connectedCallback() {
+  @property() title: string = "";
+  @property() summary: string = "";
+  @property({ type: Boolean }) expanded: boolean = false;
+  @state() isExpanded: boolean = false;
+
+  connectedCallback(): void {
     super.connectedCallback();
     this.isExpanded = this.expanded;
+  }
+
+  render() {
+    return html`
+      <div
+        class="expandable ${!this.isExpanded ? "collapsed" : ""}"
+        @click=${() => (this.isExpanded = !this.isExpanded)}
+      >
+        <div class="title">
+          <span
+            class="codicon ${this.isExpanded ? "codicon-chevron-down" : "codicon-chevron-right"}"
+          ></span>
+          <span>${this.title}</span>
+        </div>
+        <span class="summary">${this.summary}</span>
+      </div>
+      <div class="content">
+        ${this.isExpanded ? html`<slot></slot>` : nothing}
+      </div>
+    `;
   }
 }

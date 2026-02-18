@@ -28,12 +28,12 @@ export class Logger {
     };
 
     public static configure(context: vscode.ExtensionContext): void {
-        this._outputChannel = vscode.window.createOutputChannel("NuGet Gallery");
+        this._outputChannel = vscode.window.createOutputChannel("NuGet Workbench");
         context.subscriptions.push(this._outputChannel);
 
         this.updateLogLevel();
         context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration('NugetGallery.logLevel')) {
+            if (e.affectsConfiguration('NugetWorkbench.logLevel')) {
                 this.updateLogLevel();
             }
         }));
@@ -43,7 +43,7 @@ export class Logger {
             this._isEnabled = true;
             this._provider = new BasicTracerProvider({
                 resource: new Resource({
-                    [SEMRESATTRS_SERVICE_NAME]: "nuget-gallery",
+                    [SEMRESATTRS_SERVICE_NAME]: "nuget-workbench",
                     [SEMRESATTRS_SERVICE_VERSION]: context.extension.packageJSON.version,
                     [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]: process.env.ENVIRONMENT,
                     [SEMRESATTRS_DEVICE_ID]: vscode.env.machineId,
@@ -88,7 +88,7 @@ export class Logger {
     }
 
     private static updateLogLevel(): void {
-        const logLevel = vscode.workspace.getConfiguration('NugetGallery').get<string>('logLevel', 'INFO');
+        const logLevel = vscode.workspace.getConfiguration('NugetWorkbench').get<string>('logLevel', 'INFO');
         this._logLevel = this._logLevels[logLevel] ?? 1;
     }
 

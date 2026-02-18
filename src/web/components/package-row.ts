@@ -1,68 +1,10 @@
-import {
-  FASTElement,
-  attr,
-  css,
-  customElement,
-  html,
-  observable,
-  volatile,
-  when,
-} from "@microsoft/fast-element";
+import { LitElement, css, html, nothing } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
 import { PackageViewModel } from "../types";
 import codicon from "@/web/styles/codicon.css";
 
-const template = html<PackageRow>`
-${when((x) => x.package, html<PackageRow>`
-<div class="package-row ${(x) =>
-  x.package.Selected ? "package-row-selected" : ""} ${(x) =>
-  x.package.Status === "Error" ? "package-row-error" : ""}">
-    <div class="package-title">
-    <img class="icon" src=${(x) => x.IconUrl} @error="${(x) =>
-  (x.iconUrl =
-    "https://nuget.org/Content/gallery/img/default-package-icon.svg")}" />
-    <div class="title">
-    <span class="name">${(x) => x.package.Name}</span>
-    ${when(
-      (x) => x.package.Authors,
-      html<PackageRow>`<span class="authors"
-        >@${(x) => x.package.Authors}</span
-      >`
-    )}
-    </div>
-    </div>
-    <div class="package-version"> ${when(
-      (x) => x.showInstalledVersion,
-      html<PackageRow>`
-        ${(x) => x.package.InstalledVersion}
-        ${when(
-          (x) => x.package.Status == "MissingDetails",
-          html<PackageRow>`<vscode-progress-ring
-            class="loader"
-          ></vscode-progress-ring>`
-        )}
-        ${when(
-          (x) => x.package.Status == "Error",
-          html<PackageRow>`<span
-            class="codicon codicon-error"
-            title="Failed to fetch package information"
-          ></span>`
-        )}
-        ${when(
-          (x) =>
-            x.package.Status == "Detailed" &&
-            x.package.Version != x.package.InstalledVersion &&
-            x.package.AllowsUpdate,
-          html<PackageRow>`<span
-            class="codicon codicon-arrow-circle-up"
-          ></span>`
-        )}
-      `,
-      html<PackageRow>`${(x) => x.package.Version}`
-    )}
-    </div>
-</div>
-`)}
-`;
+const DEFAULT_ICON_URL = "https://nuget.org/Content/gallery/img/default-package-icon.svg";
+
 const styles = css`
   .package-row {
     margin: 2px;
@@ -88,6 +30,11 @@ const styles = css`
       background-color: var(--vscode-list-hoverBackground);
     }
 
+    &:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder);
+      outline-offset: -1px;
+    }
+
     .package-title {
       display: flex;
       gap: 4px;
@@ -97,7 +44,6 @@ const styles = css`
       .title {
         overflow: hidden;
         white-space: nowrap;
-
         text-overflow: ellipsis;
       }
       .icon {
@@ -107,9 +53,6 @@ const styles = css`
       .name {
         font-weight: bold;
       }
-
-      .authors {
-      }
     }
 
     .package-version {
@@ -118,28 +61,106 @@ const styles = css`
       display: flex;
       align-items: center;
       gap: 3px;
-      .loader {
+
+      .spinner {
+        display: inline-block;
+        width: 12px;
         height: 12px;
+        border: 2px solid var(--vscode-progressBar-background);
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
       }
+    }
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
     }
   }
 `;
 
-@customElement({
-  name: "package-row",
-  template,
-  styles: [codicon, styles],
-})
-export class PackageRow extends FASTElement {
-  @attr showInstalledVersion!: boolean;
-  @observable package!: PackageViewModel;
-  @observable iconUrl: string | null = null;
+@customElement("package-row")
+export class PackageRow extends LitElement {
+  static styles = [codicon, styles];
 
-  @volatile
-  get IconUrl() {
-    if (!this.package?.IconUrl)
-      this.iconUrl =
-        "https://nuget.org/Content/gallery/img/default-package-icon.svg";
-    return this.iconUrl ?? this.package?.IconUrl;
+  @property({ type: Boolean }) showInstalledVersion!: boolean;
+  @property({ type: Object }) package!: PackageViewModel;
+  @state() iconUrl: string | null = null;
+
+  get resolvedIconUrl(): string {
+    if (!this.package?.IconUrl) {
+      return DEFAULT_ICON_URL;
+    }
+    return this.iconUrl ?? this.package.IconUrl;
+  }
+
+  private onIconError(): void {
+    this.iconUrl = DEFAULT_ICON_URL;
+  }
+
+  private renderVersionContent() {
+    if (!this.showInstalledVersion) {
+      return html`${this.package.Version}`;
+    }
+
+    const hasUpdate =
+      this.package.Status === "Detailed" &&
+      this.package.Version !== this.package.InstalledVersion &&
+      this.package.AllowsUpdate;
+
+    return html`
+      ${this.package.InstalledVersion}
+      ${this.package.Status === "MissingDetails"
+        ? html`<span class="spinner"></span>`
+        : nothing}
+      ${this.package.Status === "Error"
+        ? html`<span
+            class="codicon codicon-error"
+            title="Failed to fetch package information"
+          ></span>`
+        : nothing}
+      ${hasUpdate
+        ? html`<span class="codicon codicon-arrow-circle-up"></span>`
+        : nothing}
+    `;
+  }
+
+  render() {
+    if (!this.package) {
+      return nothing;
+    }
+
+    return html`
+      <div
+        class="package-row ${this.package.Selected ? "package-row-selected" : ""} ${this.package.Status === "Error" ? "package-row-error" : ""}"
+        role="option"
+        tabindex="0"
+        aria-selected=${this.package.Selected ? "true" : "false"}
+        @keydown=${(e: KeyboardEvent) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            this.dispatchEvent(new Event("click", { bubbles: true, composed: true }));
+          }
+        }}
+      >
+        <div class="package-title">
+          <img
+            class="icon"
+            alt=""
+            src=${this.resolvedIconUrl}
+            @error=${() => this.onIconError()}
+          />
+          <div class="title">
+            <span class="name">${this.package.Name}</span>
+            ${this.package.Authors
+              ? html`<span class="authors">@${this.package.Authors}</span>`
+              : nothing}
+          </div>
+        </div>
+        <div class="package-version">${this.renderVersionContent()}</div>
+      </div>
+    `;
   }
 }

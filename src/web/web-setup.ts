@@ -38,7 +38,7 @@ const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', {
 (global as any).MouseEvent = dom.window.MouseEvent;
 (global as any).CustomEvent = dom.window.CustomEvent;
 (global as any).MutationObserver = dom.window.MutationObserver;
-(global as any).HTMLStyleElement = dom.window.HTMLStyleElement; // Required for FAST element styles
+(global as any).HTMLStyleElement = dom.window.HTMLStyleElement; // Required for Lit element styles
 
 // Polyfill window.matchMedia
 (global as any).window.matchMedia = (global as any).window.matchMedia || function() {
@@ -63,6 +63,6 @@ Object.defineProperty(global, 'navigator', {
     writable: true
 });
 
-// RequestAnimationFrame polyfill (FASTElement uses it)
+// RequestAnimationFrame polyfill (LitElement uses it)
 (global as any).requestAnimationFrame = (callback: any) => setTimeout(callback, 0);
 (global as any).cancelAnimationFrame = (id: any) => clearTimeout(id);

@@ -1,69 +1,10 @@
-import {
-  FASTElement,
-  attr,
-  css,
-  customElement,
-  html,
-  observable,
-  volatile,
-  when,
-} from "@microsoft/fast-element";
-
+import { LitElement, css, html, nothing } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
 import codicon from "@/web/styles/codicon.css";
-import { IMediator } from "../registrations";
-import { UPDATE_PROJECT } from "@/common/messaging/core/commands";
+import { hostApi } from "../registrations";
 import { ProjectPackageViewModel, ProjectViewModel } from "../types";
-import ObservableDictionary from "../utilities/ObservableDictionary";
+import type { UpdateProjectRequest } from "@/common/rpc/types";
 
-const template = html<ProjectRow>`
-  <div class="project-row">
-    <div class="project-title">
-      <span class="name">${(x) => x.project.Name}</span>
-    </div>
-    <div class="project-actions">
-      ${when(
-        (x) => x.loaders.Get(x.packageId) === true,
-        html<ProjectRow>`<vscode-progress-ring class="loader"></vscode-progress-ring>`,
-        html<ProjectRow>`
-          <span class="version">${(x) => x.ProjectPackage?.Version}</span>
-          ${when(
-            (x) => x.ProjectPackage !== undefined,
-            html<ProjectRow>`
-              ${when(
-                (x) =>
-                  x.ProjectPackage?.Version != x.packageVersion &&
-                  x.ProjectPackage?.Version != undefined &&
-                  !x.ProjectPackage?.IsPinned,
-                html<ProjectRow>`
-                  <vscode-button appearance="icon">
-                    <span
-                      class="codicon codicon-arrow-circle-up"
-                      @click=${(x) => x.Update("UPDATE")}
-                    ></span>
-                  </vscode-button>
-                `
-              )}
-              <vscode-button appearance="icon">
-                <span
-                  class="codicon codicon-diff-removed"
-                  @click=${(x) => x.Update("UNINSTALL")}
-                ></span>
-              </vscode-button>
-            `,
-            html<ProjectRow>`
-              <vscode-button appearance="icon">
-                <span
-                  class="codicon codicon-diff-added"
-                  @click=${(x) => x.Update("INSTALL")}
-                ></span>
-              </vscode-button>
-            `
-          )}
-        `
-      )}
-    </div>
-  </div>
-`;
 const styles = css`
   .project-row {
     margin: 2px;
@@ -85,43 +26,65 @@ const styles = css`
         font-weight: bold;
       }
     }
+
     .project-actions {
       display: flex;
       gap: 3px;
       align-items: center;
 
-      .loader {
-        padding: 3px;
-        height: 16px;
+      .spinner {
+        display: inline-block;
         width: 16px;
+        height: 16px;
+        margin: 3px;
+        border: 2px solid var(--vscode-progressBar-background);
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
       }
 
-      .version {
+      .icon-btn {
+        background: transparent;
+        border: none;
+        color: var(--vscode-icon-foreground);
+        cursor: pointer;
+        padding: 2px;
+        display: flex;
+        align-items: center;
       }
+    }
+  }
+
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
     }
   }
 `;
 
-@customElement({
-  name: "project-row",
-  template,
-  styles: [codicon, styles],
-})
-export class ProjectRow extends FASTElement {
-  @IMediator mediator!: IMediator;
-  @attr project!: ProjectViewModel;
-  @attr packageId!: string;
-  @attr packageVersion!: string;
-  @attr sourceUrl!: string;
-  @observable loaders: ObservableDictionary<boolean> = new ObservableDictionary<boolean>();
+@customElement("project-row")
+export class ProjectRow extends LitElement {
+  static styles = [codicon, styles];
 
-  @volatile
-  get ProjectPackage() {
-    const projectPackage = this.project.Packages.find((x) => x.Id == this.packageId);
-    return projectPackage;
+  @property({ type: Object }) project!: ProjectViewModel;
+  @property() packageId!: string;
+  @property() packageVersion!: string;
+  @property() sourceUrl!: string;
+  @state() private loaders = new Map<string, boolean>();
+
+  get projectPackage() {
+    return this.project.Packages.find((x) => x.Id === this.packageId);
   }
 
-  async Update(type: "INSTALL" | "UNINSTALL" | "UPDATE") {
+  private async update_(type: "INSTALL" | "UNINSTALL" | "UPDATE"): Promise<void> {
+    if (type === "UNINSTALL") {
+      const confirm = await hostApi.showConfirmation({
+        Message: `Uninstall ${this.packageId}?`,
+        Detail: `This will remove ${this.packageId} from ${this.project.Name}.`,
+      });
+      if (!confirm.ok || !confirm.value.Confirmed) return;
+    }
+
     const request: UpdateProjectRequest = {
       Type: type,
       ProjectPath: this.project.Path,
@@ -129,13 +92,72 @@ export class ProjectRow extends FASTElement {
       Version: this.packageVersion,
       SourceUrl: this.sourceUrl,
     };
-    this.loaders.Add(request.PackageId, true);
-    const result = await this.mediator.PublishAsync<UpdateProjectRequest, UpdateProjectResponse>(
-      UPDATE_PROJECT,
-      request
-    );
-    this.project.Packages = result.Project.Packages.map((x) => new ProjectPackageViewModel(x));
-    this.loaders.Remove(request.PackageId);
-    this.$emit("project-updated", { isCpmEnabled: result.IsCpmEnabled });
+
+    this.loaders.set(request.PackageId, true);
+    this.requestUpdate();
+
+    const result = await hostApi.updateProject(request);
+    if (result.ok) {
+      this.project.Packages = result.value.Project.Packages.map(
+        (x) => new ProjectPackageViewModel(x)
+      );
+      this.dispatchEvent(
+        new CustomEvent("project-updated", {
+          detail: { isCpmEnabled: result.value.IsCpmEnabled },
+          bubbles: true,
+          composed: true,
+        })
+      );
+    }
+
+    this.loaders.delete(request.PackageId);
+    this.requestUpdate();
+  }
+
+  private renderActions() {
+    if (this.loaders.get(this.packageId) === true) {
+      return html`<span class="spinner" role="status" aria-label="Loading"></span>`;
+    }
+
+    const pkg = this.projectPackage;
+    const version = pkg?.Version;
+
+    if (pkg === undefined) {
+      return html`
+        <button class="icon-btn" aria-label="Install package" title="Install" @click=${() => this.update_("INSTALL")}>
+          <span class="codicon codicon-diff-added"></span>
+        </button>
+      `;
+    }
+
+    const showUpdate =
+      version !== this.packageVersion &&
+      version !== undefined &&
+      !pkg.IsPinned;
+
+    return html`
+      <span class="version">${version}</span>
+      ${showUpdate
+        ? html`
+            <button class="icon-btn" aria-label="Update package" title="Update" @click=${() => this.update_("UPDATE")}>
+              <span class="codicon codicon-arrow-circle-up"></span>
+            </button>
+          `
+        : nothing}
+      <button class="icon-btn" aria-label="Uninstall package" title="Uninstall" @click=${() => this.update_("UNINSTALL")}>
+        <span class="codicon codicon-diff-removed"></span>
+      </button>
+    `;
+  }
+
+  render() {
+    return html`
+      <div class="project-row">
+        <div class="project-title">
+          <span class="name">${this.project.Name}</span>
+        </div>
+        <div class="project-actions">${this.renderActions()}</div>
+      </div>
+    `;
   }
 }

@@ -1,9 +1,11 @@
 import '../web-setup';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
+import * as registrations from '@/web/registrations';
+import { ok, fail } from '@/common/rpc/result';
+import type { HostAPI } from '@/common/rpc/types';
 import { PackagesView } from '@/web/components/packages-view';
 import { PackageViewModel, ProjectViewModel } from '@/web/types';
-import { DOM } from '@microsoft/fast-element';
 
 // Helper to create mock Package data
 function createMockPackage(overrides: Partial<Package> = {}): Package {
@@ -39,40 +41,31 @@ function createMockProject(name: string, packages: (ProjectPackage | { Id: strin
 suite('PackagesView Component', () => {
     let packagesView: PackagesView;
     let sandbox: sinon.SinonSandbox;
-    let mockMediator: {
-        PublishAsync: sinon.SinonStub;
-    };
-    let mockConfiguration: any;
+    let mockHostApi: Partial<HostAPI>;
 
     setup(() => {
         sandbox = sinon.createSandbox();
 
-        // Create mock mediator
-        mockMediator = {
-            PublishAsync: sandbox.stub().resolves({})
+        // Create mock hostApi
+        mockHostApi = {
+            getPackages: sandbox.stub().resolves(ok({ Packages: [] })),
+            getProjects: sandbox.stub().resolves(ok({ Projects: [] })),
+            getPackage: sandbox.stub().resolves(ok({ Package: createMockPackage(), SourceUrl: '' })),
+            updateStatusBar: sandbox.stub().resolves(ok(undefined)),
         };
 
-        // Create mock configuration
-        mockConfiguration = {
-            Configuration: {
-                Sources: [
-                    { Name: 'nuget.org', Url: 'https://api.nuget.org/v3/index.json' },
-                    { Name: 'Private', Url: 'https://private.nuget.org', PasswordScriptPath: '/script.ps1' }
-                ]
-            }
+        // Inject mock hostApi into the registrations module
+        Object.defineProperty(registrations, 'hostApi', { value: mockHostApi, writable: true, configurable: true });
+
+        // Create mock configuration with Sources
+        (registrations.configuration as any)['configuration'] = {
+            Sources: [
+                { Name: 'nuget.org', Url: 'https://api.nuget.org/v3/index.json' },
+                { Name: 'Private', Url: 'https://private.nuget.org', PasswordScriptPath: '/script.ps1' }
+            ]
         };
 
         packagesView = new PackagesView();
-        
-        // Use Object.defineProperty to override the DI-injected getter properties
-        Object.defineProperty(packagesView, 'mediator', {
-            get: () => mockMediator,
-            configurable: true
-        });
-        Object.defineProperty(packagesView, 'configuration', {
-            get: () => mockConfiguration,
-            configurable: true
-        });
 
         // Initialize observable properties (don't connect to DOM to avoid Split.js issues)
         packagesView.packages = [];
@@ -115,10 +108,7 @@ suite('PackagesView Component', () => {
 
     suite('LoadPackages', () => {
         test('should call mediator with correct parameters', async () => {
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: []
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: [] }));
 
             packagesView.filters = {
                 Prerelease: true,
@@ -128,14 +118,13 @@ suite('PackagesView Component', () => {
 
             await packagesView.LoadPackages();
 
-            assert.ok(mockMediator.PublishAsync.calledOnce);
-            const callArgs = mockMediator.PublishAsync.firstCall.args;
-            assert.strictEqual(callArgs[0], 'GetPackages');
-            assert.strictEqual(callArgs[1].Filter, 'test-query');
-            assert.strictEqual(callArgs[1].Prerelease, true);
-            assert.strictEqual(callArgs[1].Url, 'https://api.nuget.org/v3/index.json');
-            assert.strictEqual(callArgs[1].Skip, 0);
-            assert.strictEqual(callArgs[1].Take, 50);
+            assert.ok((mockHostApi.getPackages as sinon.SinonStub).calledOnce);
+            const callArgs = (mockHostApi.getPackages as sinon.SinonStub).firstCall.args[0];
+            assert.strictEqual(callArgs.Filter, 'test-query');
+            assert.strictEqual(callArgs.Prerelease, true);
+            assert.strictEqual(callArgs.Url, 'https://api.nuget.org/v3/index.json');
+            assert.strictEqual(callArgs.Skip, 0);
+            assert.strictEqual(callArgs.Take, 50);
         });
 
         test('should populate packages on successful response', async () => {
@@ -144,10 +133,7 @@ suite('PackagesView Component', () => {
                 createMockPackage({ Id: 'Package2', Name: 'Package2' })
             ];
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: mockPackages
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: mockPackages }));
 
             await packagesView.LoadPackages();
 
@@ -159,10 +145,7 @@ suite('PackagesView Component', () => {
         test('should set noMorePackages when fewer packages returned than requested', async () => {
             const mockPackages = [createMockPackage()]; // Only 1 package, less than 50
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: mockPackages
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: mockPackages }));
 
             await packagesView.LoadPackages();
 
@@ -170,10 +153,7 @@ suite('PackagesView Component', () => {
         });
 
         test('should set packagesLoadingError on failure', async () => {
-            mockMediator.PublishAsync.resolves({
-                IsFailure: true,
-                Error: { Message: 'Network error' }
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(fail('Network error'));
 
             await packagesView.LoadPackages();
 
@@ -187,10 +167,9 @@ suite('PackagesView Component', () => {
             ];
             packagesView.packagesPage = 1;
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: [createMockPackage({ Id: 'NewPackage' })]
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(
+                ok({ Packages: [createMockPackage({ Id: 'NewPackage' })] })
+            );
 
             await packagesView.LoadPackages(true);
 
@@ -204,10 +183,9 @@ suite('PackagesView Component', () => {
                 new PackageViewModel(createMockPackage({ Id: 'OldPackage' }))
             ];
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: [createMockPackage({ Id: 'NewPackage' })]
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(
+                ok({ Packages: [createMockPackage({ Id: 'NewPackage' })] })
+            );
 
             await packagesView.LoadPackages(false);
 
@@ -216,32 +194,24 @@ suite('PackagesView Component', () => {
         });
 
         test('should pass ForceReload flag to mediator', async () => {
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: []
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: [] }));
 
             await packagesView.LoadPackages(false, true);
 
-            const callArgs = mockMediator.PublishAsync.firstCall.args;
-            assert.strictEqual(callArgs[1].ForceReload, true);
+            const callArgs = (mockHostApi.getPackages as sinon.SinonStub).firstCall.args[0];
+            assert.strictEqual(callArgs.ForceReload, true);
         });
     });
 
     suite('LoadProjects', () => {
         test('should call mediator with correct parameters', async () => {
-            mockMediator.PublishAsync.resolves({
-                Projects: []
-            });
+            (mockHostApi.getProjects as sinon.SinonStub).resolves(ok({ Projects: [] }));
 
             await packagesView.LoadProjects();
 
-            assert.ok(mockMediator.PublishAsync.called);
-            const getProjectsCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetProjects'
-            );
-            assert.ok(getProjectsCall);
-            assert.strictEqual(getProjectsCall.args[1].ForceReload, false);
+            assert.ok((mockHostApi.getProjects as sinon.SinonStub).called);
+            const callArgs = (mockHostApi.getProjects as sinon.SinonStub).firstCall.args[0];
+            assert.strictEqual(callArgs.ForceReload, false);
         });
 
         test('should populate projects from response', async () => {
@@ -250,9 +220,7 @@ suite('PackagesView Component', () => {
                 createMockProject('Project2', [{ Id: 'Pkg2', Version: '2.0.0' }])
             ];
 
-            mockMediator.PublishAsync.resolves({
-                Projects: mockProjects
-            });
+            (mockHostApi.getProjects as sinon.SinonStub).resolves(ok({ Projects: mockProjects }));
 
             await packagesView.LoadProjects();
 
@@ -262,17 +230,12 @@ suite('PackagesView Component', () => {
         });
 
         test('should pass ForceReload flag', async () => {
-            mockMediator.PublishAsync.resolves({
-                Projects: []
-            });
+            (mockHostApi.getProjects as sinon.SinonStub).resolves(ok({ Projects: [] }));
 
             await packagesView.LoadProjects(true);
 
-            const getProjectsCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetProjects'
-            );
-            assert.ok(getProjectsCall);
-            assert.strictEqual(getProjectsCall.args[1].ForceReload, true);
+            const callArgs = (mockHostApi.getProjects as sinon.SinonStub).firstCall.args[0];
+            assert.strictEqual(callArgs.ForceReload, true);
         });
     });
 
@@ -317,28 +280,23 @@ suite('PackagesView Component', () => {
         test('should fetch package details if status is MissingDetails', async () => {
             const pkg = new PackageViewModel(createMockPackage(), 'MissingDetails');
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Package: createMockPackage({ Version: '1.5.0' }),
-                SourceUrl: 'https://api.nuget.org'
-            });
+            (mockHostApi.getPackage as sinon.SinonStub).resolves(
+                ok({
+                    Package: createMockPackage({ Version: '1.5.0' }),
+                    SourceUrl: 'https://api.nuget.org'
+                })
+            );
 
             await packagesView.SelectPackage(pkg);
 
-            const getPackageCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetPackage'
-            );
-            assert.ok(getPackageCall);
+            assert.ok((mockHostApi.getPackage as sinon.SinonStub).calledOnce);
             assert.strictEqual(pkg.Status, 'Detailed');
         });
 
         test('should set status to Error if package fetch fails', async () => {
             const pkg = new PackageViewModel(createMockPackage(), 'MissingDetails');
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: true,
-                Error: { Message: 'Not found' }
-            });
+            (mockHostApi.getPackage as sinon.SinonStub).resolves(fail('Not found'));
 
             await packagesView.SelectPackage(pkg);
 
@@ -348,11 +306,7 @@ suite('PackagesView Component', () => {
 
     suite('UpdatePackagesFilters', () => {
         test('should update filters', async () => {
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: [],
-                Projects: []
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: [] }));
 
             const newFilters = {
                 Prerelease: false,
@@ -368,11 +322,7 @@ suite('PackagesView Component', () => {
         });
 
         test('should reload packages with new filters', async () => {
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: [],
-                Projects: []
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: [] }));
 
             await packagesView.UpdatePackagesFilters({
                 Prerelease: false,
@@ -380,20 +330,13 @@ suite('PackagesView Component', () => {
                 SourceUrl: ''
             });
 
-            const getPackagesCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetPackages'
-            );
-            assert.ok(getPackagesCall);
+            assert.ok((mockHostApi.getPackages as sinon.SinonStub).called);
         });
 
         test('should force reload when Prerelease changes', async () => {
             packagesView.filters.Prerelease = true;
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: [],
-                Projects: []
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: [] }));
 
             await packagesView.UpdatePackagesFilters({
                 Prerelease: false, // Changed from true
@@ -401,55 +344,33 @@ suite('PackagesView Component', () => {
                 SourceUrl: ''
             });
 
-            const getPackagesCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetPackages'
-            );
-            assert.ok(getPackagesCall);
-            assert.strictEqual(getPackagesCall.args[1].ForceReload, true);
+            const callArgs = (mockHostApi.getPackages as sinon.SinonStub).firstCall.args[0];
+            assert.strictEqual(callArgs.ForceReload, true);
         });
     });
 
     suite('ReloadInvoked', () => {
         test('should reload packages and projects', async () => {
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: [],
-                Projects: []
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: [] }));
+            (mockHostApi.getProjects as sinon.SinonStub).resolves(ok({ Projects: [] }));
 
             await packagesView.ReloadInvoked();
 
-            const getPackagesCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetPackages'
-            );
-            const getProjectsCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetProjects'
-            );
-
-            assert.ok(getPackagesCall);
-            assert.ok(getProjectsCall);
+            assert.ok((mockHostApi.getPackages as sinon.SinonStub).called);
+            assert.ok((mockHostApi.getProjects as sinon.SinonStub).called);
         });
 
         test('should pass forceReload flag', async () => {
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: [],
-                Projects: []
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: [] }));
+            (mockHostApi.getProjects as sinon.SinonStub).resolves(ok({ Projects: [] }));
 
             await packagesView.ReloadInvoked(true);
 
-            const getPackagesCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetPackages'
-            );
-            const getProjectsCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetProjects'
-            );
+            const getPackagesArgs = (mockHostApi.getPackages as sinon.SinonStub).firstCall.args[0];
+            assert.strictEqual(getPackagesArgs.ForceReload, true);
 
-            assert.ok(getPackagesCall);
-            assert.strictEqual(getPackagesCall.args[1].ForceReload, true);
-            assert.ok(getProjectsCall);
-            assert.strictEqual(getProjectsCall.args[1].ForceReload, true);
+            const getProjectsArgs = (mockHostApi.getProjects as sinon.SinonStub).firstCall.args[0];
+            assert.strictEqual(getProjectsArgs.ForceReload, true);
         });
     });
 
@@ -465,7 +386,7 @@ suite('PackagesView Component', () => {
 
             await packagesView.PackagesScrollEvent(mockTarget);
 
-            assert.ok(mockMediator.PublishAsync.notCalled);
+            assert.ok((mockHostApi.getPackages as sinon.SinonStub).notCalled);
         });
 
         test('should not load more if noMorePackages is true', async () => {
@@ -479,17 +400,14 @@ suite('PackagesView Component', () => {
 
             await packagesView.PackagesScrollEvent(mockTarget);
 
-            assert.ok(mockMediator.PublishAsync.notCalled);
+            assert.ok((mockHostApi.getPackages as sinon.SinonStub).notCalled);
         });
 
         test('should load more when scrolled near bottom', async () => {
             packagesView.packagesLoadingInProgress = false;
             packagesView.noMorePackages = false;
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Packages: []
-            });
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: [] }));
 
             // Simulate scrolled near bottom
             const mockTarget = {
@@ -500,15 +418,13 @@ suite('PackagesView Component', () => {
 
             await packagesView.PackagesScrollEvent(mockTarget);
 
-            assert.ok(mockMediator.PublishAsync.called);
+            assert.ok((mockHostApi.getPackages as sinon.SinonStub).called);
         });
     });
 
     suite('OnProjectUpdated', () => {
         test('should reload all projects when CPM is enabled', async () => {
-            mockMediator.PublishAsync.resolves({
-                Projects: []
-            });
+            (mockHostApi.getProjects as sinon.SinonStub).resolves(ok({ Projects: [] }));
 
             const event = new CustomEvent('project-updated', {
                 detail: { isCpmEnabled: true }
@@ -516,10 +432,7 @@ suite('PackagesView Component', () => {
 
             await packagesView.OnProjectUpdated(event);
 
-            const getProjectsCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetProjects'
-            );
-            assert.ok(getProjectsCall);
+            assert.ok((mockHostApi.getProjects as sinon.SinonStub).called);
         });
 
         test('should only refresh packages when CPM is not enabled', async () => {
@@ -530,10 +443,9 @@ suite('PackagesView Component', () => {
                 ]))
             ];
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Package: createMockPackage()
-            });
+            (mockHostApi.getPackage as sinon.SinonStub).resolves(
+                ok({ Package: createMockPackage(), SourceUrl: '' })
+            );
 
             const event = new CustomEvent('project-updated', {
                 detail: { isCpmEnabled: false }
@@ -541,11 +453,8 @@ suite('PackagesView Component', () => {
 
             await packagesView.OnProjectUpdated(event);
 
-            // Should call GET_PACKAGE for installed packages, not GET_PROJECTS
-            const getProjectsCall = mockMediator.PublishAsync.getCalls().find(
-                c => c.args[0] === 'GetProjects'
-            );
-            assert.strictEqual(getProjectsCall, undefined);
+            // Should call getPackage for installed packages, not getProjects
+            assert.ok((mockHostApi.getProjects as sinon.SinonStub).notCalled);
         });
     });
 
@@ -652,11 +561,9 @@ suite('PackagesView Component', () => {
                 ]))
             ];
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Package: createMockPackage(),
-                SourceUrl: 'https://api.nuget.org'
-            });
+            (mockHostApi.getPackage as sinon.SinonStub).resolves(
+                ok({ Package: createMockPackage(), SourceUrl: 'https://api.nuget.org' })
+            );
 
             await packagesView.LoadProjectsPackages();
 
@@ -674,11 +581,12 @@ suite('PackagesView Component', () => {
             packagesView.filters.Query = 'newtonsoft';
 
             // Mock returns matching package
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Package: createMockPackage({ Id: 'Newtonsoft.Json', Name: 'Newtonsoft.Json' }),
-                SourceUrl: ''
-            });
+            (mockHostApi.getPackage as sinon.SinonStub).resolves(
+                ok({
+                    Package: createMockPackage({ Id: 'Newtonsoft.Json', Name: 'Newtonsoft.Json' }),
+                    SourceUrl: ''
+                })
+            );
 
             await packagesView.LoadProjectsPackages();
 
@@ -698,11 +606,12 @@ suite('PackagesView Component', () => {
             ];
 
             // Mock returns matching package ID so the find() works
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Package: createMockPackage({ Id: 'Pkg1', Name: 'Pkg1' }),
-                SourceUrl: ''
-            });
+            (mockHostApi.getPackage as sinon.SinonStub).resolves(
+                ok({
+                    Package: createMockPackage({ Id: 'Pkg1', Name: 'Pkg1' }),
+                    SourceUrl: ''
+                })
+            );
 
             await packagesView.LoadProjectsPackages();
 
@@ -718,24 +627,21 @@ suite('PackagesView Component', () => {
                 ]))
             ];
 
-            mockMediator.PublishAsync.resolves({
-                IsFailure: false,
-                Package: createMockPackage(),
-                SourceUrl: ''
-            });
+            (mockHostApi.getPackage as sinon.SinonStub).resolves(
+                ok({ Package: createMockPackage(), SourceUrl: '' })
+            );
 
             await packagesView.LoadProjectsPackages();
 
-            const statusBarCalls = mockMediator.PublishAsync.getCalls().filter(
-                c => c.args[0] === 'UpdateStatusBar'
-            );
+            const statusBarStub = mockHostApi.updateStatusBar as sinon.SinonStub;
+            const statusBarCalls = statusBarStub.getCalls();
 
             // Should have calls for: start (0%), progress, and hide (null)
             assert.ok(statusBarCalls.length >= 2);
-            
+
             // Last call should hide the status bar
             const lastCall = statusBarCalls[statusBarCalls.length - 1];
-            assert.strictEqual(lastCall.args[1].Percentage, null);
+            assert.strictEqual(lastCall.args[0].Percentage, null);
         });
     });
 });

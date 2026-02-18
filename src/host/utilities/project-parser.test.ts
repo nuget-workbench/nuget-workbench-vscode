@@ -9,14 +9,14 @@ suite('ProjectParser Tests', () => {
     let tmpDir: string;
 
     setup(() => {
-        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nuget-gallery-test-'));
+        tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nuget-workbench-test-'));
     });
 
     teardown(() => {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     });
 
-    test('Parse returns project with packages for valid XML', () => {
+    test('Parse returns project with packages for valid XML', async () => {
         const projectPath = path.join(tmpDir, 'test.csproj');
         const xml = `
             <Project>
@@ -27,7 +27,7 @@ suite('ProjectParser Tests', () => {
             </Project>`;
         fs.writeFileSync(projectPath, xml);
 
-        const project = ProjectParser.Parse(projectPath);
+        const project = await ProjectParser.Parse(projectPath);
 
         assert.strictEqual(project.Packages.length, 2);
         assert.strictEqual(project.Packages[0].Id, 'Newtonsoft.Json');
@@ -36,7 +36,7 @@ suite('ProjectParser Tests', () => {
         assert.strictEqual(project.Packages[1].Version, '2.10.0');
     });
 
-    test('Parse handles CPM versions correctly', () => {
+    test('Parse handles CPM versions correctly', async () => {
         const projectPath = path.join(tmpDir, 'cpm.csproj');
         const xml = `
             <Project>
@@ -50,7 +50,7 @@ suite('ProjectParser Tests', () => {
         const cpmVersions = new Map<string, string>();
         cpmVersions.set('Newtonsoft.Json', '13.0.3');
 
-        const project = ProjectParser.Parse(projectPath, cpmVersions);
+        const project = await ProjectParser.Parse(projectPath, cpmVersions);
 
         assert.strictEqual(project.Packages.length, 2);
         assert.strictEqual(project.Packages[0].Id, 'Newtonsoft.Json');
@@ -60,7 +60,7 @@ suite('ProjectParser Tests', () => {
         assert.strictEqual(project.Packages[1].Version, '1.0.0');
     });
 
-    test('Parse logs warning for missing CPM version', () => {
+    test('Parse logs warning for missing CPM version', async () => {
         const projectPath = path.join(tmpDir, 'cpm_missing.csproj');
         const xml = `
             <Project>
@@ -83,7 +83,7 @@ suite('ProjectParser Tests', () => {
         };
 
         try {
-            const project = ProjectParser.Parse(projectPath, cpmVersions);
+            const project = await ProjectParser.Parse(projectPath, cpmVersions);
             assert.strictEqual(project.Packages.length, 1);
             assert.strictEqual(warned, true);
         } finally {
@@ -91,7 +91,7 @@ suite('ProjectParser Tests', () => {
         }
     });
 
-    test('Parse throws error for invalid XML', () => {
+    test('Parse throws error for invalid XML', async () => {
         const projectPath = path.join(tmpDir, 'invalid.csproj');
         const content = 'Invalid Content';
         fs.writeFileSync(projectPath, content);
@@ -104,8 +104,8 @@ suite('ProjectParser Tests', () => {
         };
 
         try {
-            assert.throws(() => {
-                ProjectParser.Parse(projectPath);
+            await assert.rejects(async () => {
+                await ProjectParser.Parse(projectPath);
             });
             assert.strictEqual(errorLogged, true);
         } finally {
@@ -113,12 +113,12 @@ suite('ProjectParser Tests', () => {
         }
     });
 
-     test('Parse handles empty project', () => {
+     test('Parse handles empty project', async () => {
         const projectPath = path.join(tmpDir, 'empty.csproj');
         const xml = `<Project></Project>`;
         fs.writeFileSync(projectPath, xml);
 
-        const project = ProjectParser.Parse(projectPath);
+        const project = await ProjectParser.Parse(projectPath);
         assert.strictEqual(project.Packages.length, 0);
     });
 });

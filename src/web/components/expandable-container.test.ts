@@ -1,7 +1,6 @@
 import '../web-setup';
 import * as assert from 'assert';
 import { ExpandableContainer } from '@/web/components/expandable-container';
-import { DOM } from '@microsoft/fast-element';
 
 suite('ExpandableContainer Component', () => {
     let container: ExpandableContainer;
@@ -27,7 +26,7 @@ suite('ExpandableContainer Component', () => {
         expandedContainer.setAttribute('expanded', '');
         document.body.appendChild(expandedContainer);
 
-        await DOM.nextUpdate();
+        await expandedContainer.updateComplete;
 
         assert.strictEqual(expandedContainer.expanded, true);
         assert.strictEqual(expandedContainer.isExpanded, true);
@@ -39,7 +38,7 @@ suite('ExpandableContainer Component', () => {
         container.setAttribute('title', 'Test Title');
         container.setAttribute('summary', 'Test Summary');
 
-        await DOM.nextUpdate();
+        await container.updateComplete;
 
         assert.strictEqual(container.title, 'Test Title');
         assert.strictEqual(container.summary, 'Test Summary');
@@ -53,6 +52,8 @@ suite('ExpandableContainer Component', () => {
     });
 
     test('should toggle expansion when header is clicked', async () => {
+        await container.updateComplete;
+
         const shadowRoot = container.shadowRoot!;
         const header = shadowRoot.querySelector('.expandable') as HTMLElement;
         const icon = shadowRoot.querySelector('.codicon') as HTMLElement;
@@ -64,7 +65,7 @@ suite('ExpandableContainer Component', () => {
 
         // Click to expand
         header.click();
-        await DOM.nextUpdate();
+        await container.updateComplete;
 
         assert.strictEqual(container.isExpanded, true);
         assert.ok(!header.classList.contains('collapsed'));
@@ -73,7 +74,7 @@ suite('ExpandableContainer Component', () => {
 
         // Click to collapse
         header.click();
-        await DOM.nextUpdate();
+        await container.updateComplete;
 
         assert.strictEqual(container.isExpanded, false);
         assert.ok(header.classList.contains('collapsed'));
@@ -87,7 +88,7 @@ suite('ExpandableContainer Component', () => {
         container.appendChild(content);
 
         container.isExpanded = true;
-        await DOM.nextUpdate();
+        await container.updateComplete;
 
         const slot = container.shadowRoot?.querySelector('slot') as HTMLSlotElement;
         assert.ok(slot);

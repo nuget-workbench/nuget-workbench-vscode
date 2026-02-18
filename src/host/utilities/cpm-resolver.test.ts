@@ -48,12 +48,12 @@ suite('CpmResolver Tests', () => {
         }
     });
 
-    test('GetPackageVersions returns null when no Directory.Packages.props exists', () => {
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+    test('GetPackageVersions returns null when no Directory.Packages.props exists', async () => {
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.strictEqual(versions, null);
     });
 
-    test('GetPackageVersions returns null when CPM is disabled in Directory.Packages.props', () => {
+    test('GetPackageVersions returns null when CPM is disabled in Directory.Packages.props', async () => {
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         const cpmContent = `
             <Project>
@@ -63,11 +63,11 @@ suite('CpmResolver Tests', () => {
             </Project>`;
         fs.writeFileSync(cpmPath, cpmContent);
 
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.strictEqual(versions, null);
     });
 
-    test('GetPackageVersions returns null when CPM is enabled in props but disabled in Project', () => {
+    test('GetPackageVersions returns null when CPM is enabled in props but disabled in Project', async () => {
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         const cpmContent = `
             <Project>
@@ -86,11 +86,11 @@ suite('CpmResolver Tests', () => {
             </Project>`;
         fs.writeFileSync(projectPath, projectContent);
 
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.strictEqual(versions, null);
     });
 
-    test('GetPackageVersions returns null when CPM property is missing (defaults to false/disabled in this logic)', () => {
+    test('GetPackageVersions returns null when CPM property is missing (defaults to false/disabled in this logic)', async () => {
         // The implementation checks if cpmEnabled !== "true" -> return false.
         // So if missing, it's not "true", so false.
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
@@ -102,11 +102,11 @@ suite('CpmResolver Tests', () => {
             </Project>`;
         fs.writeFileSync(cpmPath, cpmContent);
 
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.strictEqual(versions, null);
     });
 
-    test('GetPackageVersions parses versions when CPM is enabled', () => {
+    test('GetPackageVersions parses versions when CPM is enabled', async () => {
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         const cpmContent = `
             <Project>
@@ -120,14 +120,14 @@ suite('CpmResolver Tests', () => {
             </Project>`;
         fs.writeFileSync(cpmPath, cpmContent);
 
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.notStrictEqual(versions, null);
         assert.strictEqual(versions!.size, 2);
         assert.strictEqual(versions!.get('Package.A'), '1.0.0');
         assert.strictEqual(versions!.get('Package.B'), '2.0.0');
     });
 
-    test('GetPackageVersions finds Directory.Packages.props in parent directory', () => {
+    test('GetPackageVersions finds Directory.Packages.props in parent directory', async () => {
         // Create CPM file in root tmpDir, project is in tmpDir/src/MyProject/
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         const cpmContent = `
@@ -141,12 +141,12 @@ suite('CpmResolver Tests', () => {
             </Project>`;
         fs.writeFileSync(cpmPath, cpmContent);
 
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.notStrictEqual(versions, null);
         assert.strictEqual(versions!.get('Root.Package'), '3.0.0');
     });
 
-    test('GetPackageVersions uses cache on subsequent calls', () => {
+    test('GetPackageVersions uses cache on subsequent calls', async () => {
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         const cpmContent1 = `
             <Project>
@@ -160,7 +160,7 @@ suite('CpmResolver Tests', () => {
         fs.writeFileSync(cpmPath, cpmContent1);
 
         // First call
-        let versions = CpmResolver.GetPackageVersions(projectPath);
+        let versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.strictEqual(versions!.get('Test.Package'), '1.0.0');
 
         // Update file
@@ -176,11 +176,11 @@ suite('CpmResolver Tests', () => {
         fs.writeFileSync(cpmPath, cpmContent2);
 
         // Second call should return cached value
-        versions = CpmResolver.GetPackageVersions(projectPath);
+        versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.strictEqual(versions!.get('Test.Package'), '1.0.0');
     });
 
-    test('ClearCache clears the cache', () => {
+    test('ClearCache clears the cache', async () => {
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         const cpmContent1 = `
             <Project>
@@ -193,7 +193,7 @@ suite('CpmResolver Tests', () => {
             </Project>`;
         fs.writeFileSync(cpmPath, cpmContent1);
 
-        CpmResolver.GetPackageVersions(projectPath);
+        await CpmResolver.GetPackageVersions(projectPath);
 
         // Update file
         const cpmContent2 = `
@@ -211,11 +211,11 @@ suite('CpmResolver Tests', () => {
         CpmResolver.ClearCache();
 
         // Should get new value
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.strictEqual(versions!.get('Test.Package'), '2.0.0');
     });
 
-    test('ClearCacheForProject clears cache for specific project', () => {
+    test('ClearCacheForProject clears cache for specific project', async () => {
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         const cpmContent1 = `
             <Project>
@@ -228,7 +228,7 @@ suite('CpmResolver Tests', () => {
             </Project>`;
         fs.writeFileSync(cpmPath, cpmContent1);
 
-        CpmResolver.GetPackageVersions(projectPath);
+        await CpmResolver.GetPackageVersions(projectPath);
 
         // Update file
         const cpmContent2 = `
@@ -246,11 +246,11 @@ suite('CpmResolver Tests', () => {
         CpmResolver.ClearCacheForProject(projectPath);
 
         // Should get new value
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.strictEqual(versions!.get('Test.Package'), '2.0.0');
     });
 
-    test('GetPackageVersions returns null for malformed CPM file', () => {
+    test('GetPackageVersions returns null for malformed CPM file', async () => {
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         // Malformed XML (missing closing tag).
         // xmldom fails to parse the structure correctly, so enable check returns false.
@@ -267,7 +267,7 @@ suite('CpmResolver Tests', () => {
         let errorLogged = false;
         Logger.error = () => { errorLogged = true; };
 
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
 
         // We expect null because IsCentralPackageManagementEnabled returns false due to parsing failure
         assert.strictEqual(versions, null);
@@ -276,7 +276,7 @@ suite('CpmResolver Tests', () => {
         assert.strictEqual(errorLogged, false);
     });
 
-    test('ParsePackageVersions handles items with missing attributes', () => {
+    test('ParsePackageVersions handles items with missing attributes', async () => {
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         const cpmContent = `
             <Project>
@@ -291,14 +291,14 @@ suite('CpmResolver Tests', () => {
             </Project>`;
         fs.writeFileSync(cpmPath, cpmContent);
 
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.notStrictEqual(versions, null);
         assert.strictEqual(versions!.size, 1);
         assert.strictEqual(versions!.get('Valid.Package'), '1.0.0');
         assert.strictEqual(versions!.has('Missing.Version'), false);
     });
 
-    test('IsCentralPackageManagementEnabled returns false if project file cannot be read', () => {
+    test('IsCentralPackageManagementEnabled returns false if project file cannot be read', async () => {
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         const cpmContent = `
             <Project>
@@ -314,7 +314,7 @@ suite('CpmResolver Tests', () => {
         let errorLogged = false;
         Logger.error = () => { errorLogged = true; };
 
-        const versions = CpmResolver.GetPackageVersions(projectPath);
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
         assert.strictEqual(versions, null);
         assert.strictEqual(errorLogged, true);
     });

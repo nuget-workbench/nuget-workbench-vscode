@@ -1,20 +1,17 @@
-import { Observable } from "@microsoft/fast-element";
-
-export default class ObservableDictionary<T> {
-  private internal: { [id: string]: T } = {};
+export default class ObservableDictionary<T> extends EventTarget {
+  private internal = new Map<string, T>();
 
   Add(id: string, obj: T) {
-    this.internal[id] = obj;
-    Observable.notify(this, id);
+    this.internal.set(id, obj);
+    this.dispatchEvent(new CustomEvent("change", { detail: { id } }));
   }
 
   Remove(id: string) {
-    delete this.internal[id];
-    Observable.notify(this, id);
+    this.internal.delete(id);
+    this.dispatchEvent(new CustomEvent("change", { detail: { id } }));
   }
 
   Get(id: string): T | undefined {
-    Observable.track(this, id);
-    return id in this.internal ? this.internal[id] : undefined;
+    return this.internal.get(id);
   }
 }

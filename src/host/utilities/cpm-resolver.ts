@@ -7,7 +7,7 @@ import { Logger } from "../../common/logger";
 export default class CpmResolver {
   private static cache: Map<string, Map<string, string>> = new Map();
 
-  static GetPackageVersions(projectPath: string): Map<string, string> | null {
+  static async GetPackageVersions(projectPath: string): Promise<Map<string, string> | null> {
     const cpmFilePath = this.FindDirectoryPackagesPropsFile(projectPath);
     if (!cpmFilePath) {
       return null;
@@ -15,7 +15,7 @@ export default class CpmResolver {
 
     Logger.debug(`CpmResolver.GetPackageVersions: Found CPM file at ${cpmFilePath}`);
 
-    if (!this.IsCentralPackageManagementEnabled(projectPath, cpmFilePath)) {
+    if (!await this.IsCentralPackageManagementEnabled(projectPath, cpmFilePath)) {
       Logger.debug(`CpmResolver.GetPackageVersions: CPM is disabled for ${projectPath}`);
       return null;
     }
@@ -43,22 +43,22 @@ export default class CpmResolver {
     return null;
   }
 
-  private static IsCentralPackageManagementEnabled(projectPath: string, cpmFilePath: string): boolean {
+  private static async IsCentralPackageManagementEnabled(projectPath: string, cpmFilePath: string): Promise<boolean> {
     try {
       // Check if Directory.Packages.props has CPM enabled
-      const cpmContent = fs.readFileSync(cpmFilePath, "utf8");
+      const cpmContent = await fs.promises.readFile(cpmFilePath, "utf8");
       const cpmDoc = new DOMParser().parseFromString(cpmContent);
       const cpmEnabled = xpath.select("string(//PropertyGroup/ManagePackageVersionsCentrally)", cpmDoc);
-      
+
       if (cpmEnabled !== "true") {
         return false;
       }
 
       // Check if project has CPM disabled
-      const projectContent = fs.readFileSync(projectPath, "utf8");
+      const projectContent = await fs.promises.readFile(projectPath, "utf8");
       const projectDoc = new DOMParser().parseFromString(projectContent);
       const projectCpmSetting = xpath.select("string(//PropertyGroup/ManagePackageVersionsCentrally)", projectDoc);
-      
+
       if (projectCpmSetting === "false") {
         return false;
       }
@@ -70,7 +70,7 @@ export default class CpmResolver {
     }
   }
 
-  private static ParsePackageVersions(cpmFilePath: string): Map<string, string> {
+  private static async ParsePackageVersions(cpmFilePath: string): Promise<Map<string, string>> {
     if (this.cache.has(cpmFilePath)) {
       return this.cache.get(cpmFilePath)!;
     }
@@ -79,7 +79,7 @@ export default class CpmResolver {
     const versionMap = new Map<string, string>();
 
     try {
-      const cpmContent = fs.readFileSync(cpmFilePath, "utf8");
+      const cpmContent = await fs.promises.readFile(cpmFilePath, "utf8");
       const document = new DOMParser().parseFromString(cpmContent);
       const packageVersions = xpath.select("//ItemGroup/PackageVersion", document) as Node[];
 

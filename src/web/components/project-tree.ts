@@ -1,48 +1,8 @@
-import {
-  FASTElement,
-  customElement,
-  html,
-  css,
-  repeat,
-  observable,
-} from "@microsoft/fast-element";
-
+import { LitElement, css, html } from "lit";
+import { customElement, property, state } from "lit/decorators.js";
 import codicon from "@/web/styles/codicon.css";
 import { scrollableBase } from "@/web/styles/base.css";
 import { ProjectViewModel } from "../types";
-
-const template = html<ProjectTree>`
-  <div class="tree-container">
-    <div class="tree-header">
-      <input type="checkbox"
-        :checked="${(x) => x.allChecked}"
-        @change=${(x, c) =>
-          x.OnSelectAllChanged((c.event.target as HTMLInputElement).checked)}
-      />
-      <span class="header-label">All Projects</span>
-    </div>
-    <div class="tree-list">
-      ${repeat(
-        (x) => x.projects,
-        html<ProjectViewModel, ProjectTree>`
-          <div class="tree-item">
-            <input type="checkbox"
-              :checked="${(x, c) =>
-                c.parent.selectedPaths.includes(x.Path)}"
-              @change=${(x, c) =>
-                c.parent.OnItemChanged(
-                  x.Path,
-                  (c.event.target as HTMLInputElement).checked
-                )}
-            />
-            <span class="codicon codicon-file-code"></span>
-            <span class="item-label" title="${(x) => x.Path}">${(x) => x.Name}</span>
-          </div>
-        `
-      )}
-    </div>
-  </div>
-`;
 
 const styles = css`
   .tree-container {
@@ -99,26 +59,23 @@ const styles = css`
   }
 `;
 
-@customElement({
-  name: "project-tree",
-  template,
-  styles: [codicon, scrollableBase, styles],
-})
-export class ProjectTree extends FASTElement {
-  @observable projects: Array<ProjectViewModel> = [];
-  @observable selectedPaths: Array<string> = [];
-  @observable allChecked: boolean = true;
-  @observable isIndeterminate: boolean = false;
+@customElement("project-tree")
+export class ProjectTree extends LitElement {
+  static styles = [codicon, scrollableBase, styles];
 
-  projectsChanged(): void {
-    // When projects change, select all by default
-    this.selectedPaths = this.projects.map((p) => p.Path);
-    this.syncCheckboxState();
-    // Don't emit here - LoadProjects handles LoadProjectsPackages directly
-  }
+  @property({ type: Array }) projects: ProjectViewModel[] = [];
+  @state() selectedPaths: string[] = [];
+  @state() allChecked: boolean = true;
+  @state() isIndeterminate: boolean = false;
 
-  selectedPathsChanged(): void {
-    this.syncCheckboxState();
+  updated(changedProperties: Map<string, unknown>): void {
+    if (changedProperties.has("projects")) {
+      this.selectedPaths = this.projects.map((p) => p.Path);
+      this.syncCheckboxState();
+    }
+    if (changedProperties.has("selectedPaths")) {
+      this.syncCheckboxState();
+    }
   }
 
   private syncCheckboxState(): void {
@@ -129,13 +86,12 @@ export class ProjectTree extends FASTElement {
   }
 
   OnSelectAllChanged(_checked: boolean): void {
-    // When indeterminate or unchecked: select all. When all selected: deselect all.
     if (this.allChecked) {
       this.selectedPaths = [];
     } else {
       this.selectedPaths = this.projects.map((p) => p.Path);
     }
-    this.EmitSelectionChanged();
+    this.emitSelectionChanged();
   }
 
   OnItemChanged(path: string, checked: boolean): void {
@@ -144,10 +100,54 @@ export class ProjectTree extends FASTElement {
     } else {
       this.selectedPaths = this.selectedPaths.filter((p) => p !== path);
     }
-    this.EmitSelectionChanged();
+    this.emitSelectionChanged();
   }
 
-  private EmitSelectionChanged(): void {
-    this.$emit("selection-changed", this.selectedPaths);
+  private emitSelectionChanged(): void {
+    this.dispatchEvent(
+      new CustomEvent("selection-changed", {
+        detail: this.selectedPaths,
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
+  render() {
+    return html`
+      <div class="tree-container" role="group" aria-label="Project selection">
+        <div class="tree-header">
+          <input
+            type="checkbox"
+            aria-label="Select all projects"
+            .checked=${this.allChecked}
+            .indeterminate=${this.isIndeterminate}
+            @change=${(e: Event) =>
+              this.OnSelectAllChanged((e.target as HTMLInputElement).checked)}
+          />
+          <span class="header-label">All Projects</span>
+        </div>
+        <div class="tree-list" role="list">
+          ${this.projects.map(
+            (p) => html`
+              <div class="tree-item" role="listitem">
+                <input
+                  type="checkbox"
+                  aria-label="Select ${p.Name}"
+                  .checked=${this.selectedPaths.includes(p.Path)}
+                  @change=${(e: Event) =>
+                    this.OnItemChanged(
+                      p.Path,
+                      (e.target as HTMLInputElement).checked
+                    )}
+                />
+                <span class="codicon codicon-file-code"></span>
+                <span class="item-label" title=${p.Path}>${p.Name}</span>
+              </div>
+            `
+          )}
+        </div>
+      </div>
+    `;
   }
 }

@@ -1,36 +1,49 @@
 import '../web-setup';
 import * as assert from 'assert';
+import * as registrations from '@/web/registrations';
 import { PackageDetailsComponent } from '@/web/components/package-details';
 import { PackageViewModel } from '@/web/types';
-import { DOM } from '@microsoft/fast-element';
-import { GET_PACKAGE_DETAILS } from '@/common/messaging/core/commands';
+import { ok } from '@/common/rpc/result';
+import type { GetPackageDetailsRequest, GetPackageDetailsResponse, HostAPI } from '@/common/rpc/types';
+import type { Result } from '@/common/rpc/result';
 
 suite('PackageDetails Component', () => {
     let packageDetails: PackageDetailsComponent;
-    let mockMediator: any;
-    let publishAsyncStub: any;
+    let getPackageDetailsStub: (req: GetPackageDetailsRequest) => Promise<Result<GetPackageDetailsResponse>>;
+    let originalHostApi: HostAPI;
 
     setup(() => {
-        // Mock IMediator
-        publishAsyncStub = (command: string, request: any) => Promise.resolve({ Package: null });
-        mockMediator = {
-            PublishAsync: (command: string, request: any) => publishAsyncStub(command, request)
-        };
+        // Save original hostApi for teardown
+        originalHostApi = registrations.hostApi;
+
+        // Default stub returns null package
+        getPackageDetailsStub = () => Promise.resolve(ok({ Package: null as unknown as PackageDetails }));
+
+        // Mock hostApi at module level
+        const mockHostApi = {
+            getPackageDetails: (req: GetPackageDetailsRequest) => getPackageDetailsStub(req)
+        } as unknown as HostAPI;
+
+        Object.defineProperty(registrations, 'hostApi', {
+            value: mockHostApi,
+            writable: true,
+            configurable: true
+        });
 
         // Create instance
         packageDetails = new PackageDetailsComponent();
-
-        // Inject mock mediator
-        Object.defineProperty(packageDetails, 'mediator', {
-            value: mockMediator,
-            writable: true
-        });
-
         document.body.appendChild(packageDetails);
     });
 
     teardown(() => {
         document.body.removeChild(packageDetails);
+
+        // Restore original hostApi
+        Object.defineProperty(registrations, 'hostApi', {
+            value: originalHostApi,
+            writable: true,
+            configurable: true
+        });
     });
 
     test('should render package info correctly', async () => {
@@ -54,7 +67,7 @@ suite('PackageDetails Component', () => {
         const viewModel = new PackageViewModel(pkg);
 
         packageDetails.package = viewModel;
-        await DOM.nextUpdate();
+        await packageDetails.updateComplete;
 
         const shadowRoot = packageDetails.shadowRoot;
         assert.ok(shadowRoot, "Shadow root should exist");
@@ -91,49 +104,43 @@ suite('PackageDetails Component', () => {
         assert.strictEqual(projectLink?.getAttribute('href'), 'https://project.url');
     });
 
-    test('should trigger ReloadDependencies when source changes', async () => {
+    test('should trigger reloadDependencies when source changes', async () => {
         let called = false;
-        publishAsyncStub = (command: string, request: any) => {
-            if (command === GET_PACKAGE_DETAILS) {
-                called = true;
-            }
-            return Promise.resolve({ Package: null });
+        getPackageDetailsStub = () => {
+            called = true;
+            return Promise.resolve(ok({ Package: null as unknown as PackageDetails }));
         };
 
         packageDetails.packageVersionUrl = 'https://package.url';
-        packageDetails.source = 'https://source.url'; // This triggers change
+        packageDetails.source = 'https://source.url';
 
         // Wait for async operations
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        assert.ok(called, "ReloadDependencies should be called");
+        assert.ok(called, "reloadDependencies should be called");
     });
 
-    test('should trigger ReloadDependencies when packageVersionUrl changes', async () => {
+    test('should trigger reloadDependencies when packageVersionUrl changes', async () => {
         let called = false;
-        publishAsyncStub = (command: string, request: any) => {
-            if (command === GET_PACKAGE_DETAILS) {
-                called = true;
-            }
-            return Promise.resolve({ Package: null });
+        getPackageDetailsStub = () => {
+            called = true;
+            return Promise.resolve(ok({ Package: null as unknown as PackageDetails }));
         };
 
         packageDetails.source = 'https://source.url';
-        packageDetails.packageVersionUrl = 'https://package.url'; // This triggers change
+        packageDetails.packageVersionUrl = 'https://package.url';
 
         // Wait for async operations
         await new Promise(resolve => setTimeout(resolve, 0));
 
-        assert.ok(called, "ReloadDependencies should be called");
+        assert.ok(called, "reloadDependencies should be called");
     });
 
     test('should fetch package details with correct parameters', async () => {
-        let capturedRequest: any;
-        publishAsyncStub = (command: string, request: any) => {
-            if (command === GET_PACKAGE_DETAILS) {
-                capturedRequest = request;
-            }
-            return Promise.resolve({ Package: null });
+        let capturedRequest: GetPackageDetailsRequest | undefined;
+        getPackageDetailsStub = (req: GetPackageDetailsRequest) => {
+            capturedRequest = req;
+            return Promise.resolve(ok({ Package: null as unknown as PackageDetails }));
         };
 
         const source = 'https://source.url';
@@ -148,7 +155,7 @@ suite('PackageDetails Component', () => {
 
         assert.deepStrictEqual(capturedRequest, {
             PackageVersionUrl: versionUrl,
-            SourceUrl: source,
+            Url: source,
             PasswordScriptPath: passwordScript
         });
     });
@@ -164,19 +171,22 @@ suite('PackageDetails Component', () => {
             }
         };
 
-        let resolvePromise: any;
-        const promise = new Promise(resolve => { resolvePromise = resolve; });
+        let resolvePromise: (value: Result<GetPackageDetailsResponse>) => void;
+        const promise = new Promise<Result<GetPackageDetailsResponse>>(resolve => { resolvePromise = resolve; });
 
-        publishAsyncStub = () => promise;
+        getPackageDetailsStub = () => promise;
 
         packageDetails.source = 'src';
         packageDetails.packageVersionUrl = 'url';
 
-        // Check loading state
+        // Wait for Lit update cycle so updated() triggers reloadDependencies()
+        await packageDetails.updateComplete;
+
+        // Check loading state (set synchronously in reloadDependencies before first await)
         assert.strictEqual(packageDetails.packageDetailsLoading, true);
 
         // Resolve
-        resolvePromise({ Package: mockPackageDetails });
+        resolvePromise!(ok({ Package: mockPackageDetails as unknown as PackageDetails }));
 
         // Wait for async update
         await new Promise(resolve => setTimeout(resolve, 0));
@@ -186,14 +196,14 @@ suite('PackageDetails Component', () => {
     });
 
     test('should handle race condition (ignore outdated result)', async () => {
-        let resolveFirst: any;
-        const firstPromise = new Promise(resolve => { resolveFirst = resolve; });
+        let resolveFirst: (value: Result<GetPackageDetailsResponse>) => void;
+        const firstPromise = new Promise<Result<GetPackageDetailsResponse>>(resolve => { resolveFirst = resolve; });
 
-        let resolveSecond: any;
-        const secondPromise = new Promise(resolve => { resolveSecond = resolve; });
+        let resolveSecond: (value: Result<GetPackageDetailsResponse>) => void;
+        const secondPromise = new Promise<Result<GetPackageDetailsResponse>>(resolve => { resolveSecond = resolve; });
 
         let callCount = 0;
-        publishAsyncStub = () => {
+        getPackageDetailsStub = () => {
             callCount++;
             if (callCount === 1) return firstPromise;
             return secondPromise;
@@ -201,21 +211,25 @@ suite('PackageDetails Component', () => {
 
         packageDetails.source = 'src';
 
-        // First change
+        // First change — trigger separate Lit update cycle
         packageDetails.packageVersionUrl = 'url1';
+        await packageDetails.updateComplete;
 
-        // Second change
+        // Second change — triggers a new reloadDependencies call
         packageDetails.packageVersionUrl = 'url2';
+        await packageDetails.updateComplete;
+
+        assert.strictEqual(callCount, 2, 'Should have made two API calls');
 
         // Resolve first request (which corresponds to url1)
-        resolveFirst({ Package: { id: 'old' } });
+        resolveFirst!(ok({ Package: { id: 'old' } as unknown as PackageDetails }));
         await new Promise(resolve => setTimeout(resolve, 0));
 
         // Should not be updated yet because url1 != url2 (current)
         assert.strictEqual(packageDetails.packageDetails, undefined);
 
         // Resolve second request
-        resolveSecond({ Package: { id: 'new' } });
+        resolveSecond!(ok({ Package: { id: 'new' } as unknown as PackageDetails }));
         await new Promise(resolve => setTimeout(resolve, 0));
 
         assert.deepStrictEqual(packageDetails.packageDetails, { id: 'new' });
@@ -234,31 +248,20 @@ suite('PackageDetails Component', () => {
             }
         };
 
-        packageDetails.packageDetails = mockPackageDetails;
+        packageDetails.packageDetails = mockPackageDetails as unknown as PackageDetails;
         packageDetails.packageDetailsLoading = false;
 
-        await DOM.nextUpdate();
+        await packageDetails.updateComplete;
 
         const shadowRoot = packageDetails.shadowRoot;
         const depContainer = shadowRoot?.querySelector('expandable-container[title="Dependencies"]');
         assert.ok(depContainer);
 
-        // The structure is:
-        // .dependencies
-        //   ul
-        //     li (Framework 1)
-        //       text
-        //       ul
-        //         li (Dep 1)
-        //         li (Dep 2)
-        //     li (Framework 2)
-        // ...
-
         // Use direct child selector to count frameworks
         const frameworkLists = depContainer.querySelectorAll('.dependencies > ul > li');
         assert.strictEqual(frameworkLists.length, 2);
 
-        // Check content (simplified check)
+        // Check content
         const content = depContainer.textContent;
         assert.ok(content?.includes('net6.0'));
         assert.ok(content?.includes('Dep1 1.0.0'));
@@ -273,10 +276,10 @@ suite('PackageDetails Component', () => {
             }
         };
 
-        packageDetails.packageDetails = mockPackageDetails;
+        packageDetails.packageDetails = mockPackageDetails as unknown as PackageDetails;
         packageDetails.packageDetailsLoading = false;
 
-        await DOM.nextUpdate();
+        await packageDetails.updateComplete;
 
         const shadowRoot = packageDetails.shadowRoot;
         const noDeps = shadowRoot?.querySelector('.no-dependencies');

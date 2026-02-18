@@ -1,106 +1,39 @@
 # Change Log
 
-All notable changes to the "vscode-nuget-gallery" extension will be documented in this file.
+All notable changes to the "nuget-workbench" extension will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.0.1]
+## [1.0.0]
 
 ### Added
 
+- Rebranded from "NuGet Gallery" to **NuGet Workbench** with new extension ID `nuget-workbench`
+- Typed RPC layer with `Result<T>` discriminated union for host-webview communication
+- Migrated UI from FAST Element to **Lit** (LitElement) web components
+- Vulnerability scanning view with severity badges and advisory links
+- Project tree with checkbox-based multi-project selection
+- Tab-based navigation (Packages, Updates, Consolidate, Vulnerabilities, Settings)
+- Confirmation dialogs for destructive actions (uninstall, update all, consolidate all, remove source)
+- Keyboard navigation and ARIA accessibility for package rows and interactive elements
+- Central Package Management (CPM) support with `Directory.Packages.props` detection
+- NuGet.config authentication support with password script decryption
+- Inline package version decorations in project files (configurable via `NugetWorkbench.enablePackageVersionInlineInfo`)
+- Prerelease version support (configurable via `NugetWorkbench.prerelease`)
+- Status bar loading indicator (configurable via `NugetWorkbench.statusBarLoadingIndicator`)
+- Configurable logging level (configurable via `NugetWorkbench.logLevel`)
 - Support for pinned package versions using NuGet's exact version notation `[x.x.x]`
-  - Packages with exact version constraints (e.g., `Version="[11.1.0]"`) are now recognized as "pinned"
-  - Pinned versions skip inline update decorations in the editor
-  - Update icon is hidden for pinned packages in the project list
-  - In the installed packages tab, update icon shows only if at least one project allows updates (is not pinned)
-  - Version ranges like `[1.0,2.0]`, `(1.0,)`, `[1.0,)` are NOT considered pinned and will show updates normally
-- Configuration setting `NugetGallery.prerelease` to control whether prerelease versions are included when checking for package updates
-
-### Fixed
-
-- Fixed password script executing multiple times when fetching packages from sources with password script authentication. The script now executes only once and concurrent requests share the result.
-- Fixed prerelease checkbox state not being persisted across sessions
-- Fixed inline package version decorator always fetching prerelease versions regardless of the prerelease checkbox setting
-- Fixed prerelease setting synchronization between UI and configuration
-- Fixed package dependencies not loading when "All" sources is selected
-- Fixed package dependencies not parsing correctly for NuGet feeds that embed dependency data directly in the catalog entry
-
-## [2.0.0]
-
-### Added
-
-- Decorator for file editor that shows which packages are available to update (configurable via `NugetGallery.enablePackageVersionInlineInfo`)
-- 'All' option in source dropdown to search and fetch packages from all configured sources simultaneously
-- Support for Central Package Management (CPM)
-  - Automatically detects and resolves package versions from `Directory.Packages.props`
-  - Respects individual project opt-out via `<ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>`
-  - Prevents `--no-restore` bug that causes versions to be added to project files when CPM is enabled
-  - Automatically refreshes all projects when updating packages in CPM-enabled solutions
-- Package update functionality (remove and re-add with new version)
-- NuGet.config authentication support
-  - Automatic detection and parsing of NuGet.config files from workspace, user, and machine locations
-  - Support for encrypted passwords in NuGet.config via custom password decryption scripts
-  - Password script support for PowerShell (.ps1), batch (.bat/.cmd), and executable files
-  - Cached credentials to minimize script executions (5-minute TTL)
-  - Source-level password script configuration through VS Code settings
-- Status bar loading indicator (configurable via `NugetGallery.statusBarLoadingIndicator`)
-- Package update status shown in status bar
-- Configurable logging level (configurable via `NugetGallery.logLevel`)
-- Visual indication of failed package fetches in the package list
-- Display "Multiple" text for packages with mixed versions across projects
+- Multi-source search with "All" option in source dropdown
+- OpenTelemetry tracing support
 
 ### Changed
 
-- Forked from [pcislo/vscode-nuget-gallery](https://github.com/pcislo/vscode-nuget-gallery)
-- Updated repository information and author details
-- Replaced credential provider authentication with NuGet.config-based authentication
-- Refactored NuGet API factory to use Basic Authentication with credentials from NuGet.config
-- Improved error handling and logging for package fetch operations
-- Fixed dotnet CLI command argument order for package add/remove operations
+- Complete architecture rewrite with typed RPC replacing untyped message passing
+- Resizable 3-pane layout using Split.js (project tree / package list / details)
+- Improved error handling with `Result<T>` pattern throughout
+- Configuration namespace changed from `NugetGallery.*` to `NugetWorkbench.*`
 
-### Fixed
+### Credits
 
-- Fixed project reload issue
-- Fixed installed packages not loading for projects with XML namespaces
-- Fixed cache not clearing when toggling Prerelease option
-
-### Removed
-
-- Azure Pipelines CI/CD configuration
-- Telemetry (temporarily disabled, pending new configuration)
-- Sponsor functionality
-- Credential provider (CredentialProvider.Microsoft) support
-
-**Note:** This fork is maintained by [@shis91](https://github.com/shis91). Special thanks to [Patryk Cisło](https://github.com/pcislo) for creating the original extension.
-
-## [1.2.4]
-
-### Fix
-
-- Fix `Installed` tab error for Windows
-- Fixed parsing of `Version` attribute in project files
-- Fixed integration test runner configuration (CommonJS compatibility) and added unit tests for ProjectParser
-
-## [1.2.3]
-
-### Fix
-
-- Respect proxy settings when making requests to repository endpoints
-- Changed error handling to correctly log AxiosErrors
-- Missing package versions
-
-### Added
-
-- Package info and dependencies
-- Option to skip restore when adding package
-
-## [1.1.0]
-
-### Added
-
-- Package info and dependencies
-
-## [1.0.0]
-
-- Initial release
+This extension builds upon [vscode-nuget-gallery](https://github.com/pcislo/vscode-nuget-gallery) by [Patryk Cislo](https://github.com/pcislo).

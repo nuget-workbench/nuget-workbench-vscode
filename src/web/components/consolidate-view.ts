@@ -1,301 +1,214 @@
-import {
-  FASTElement,
-  customElement,
-  html,
-  css,
-  repeat,
-  observable,
-  when,
-} from "@microsoft/fast-element";
+import { LitElement, css, html, nothing } from "lit";
+import { customElement, state } from "lit/decorators.js";
 
 import codicon from "@/web/styles/codicon.css";
 import { scrollableBase } from "@/web/styles/base.css";
-import { IMediator } from "@/web/registrations";
-import {
-  GET_INCONSISTENT_PACKAGES,
-  CONSOLIDATE_PACKAGES,
-} from "@/common/messaging/core/commands";
+import { hostApi } from "@/web/registrations";
 import { InconsistentPackageViewModel } from "../types";
 
-const template = html<ConsolidateView>`
-  <div class="consolidate-container">
-    <div class="toolbar">
-      <vscode-button appearance="icon" @click=${(x) => x.LoadInconsistentPackages()}>
-        <span class="codicon codicon-refresh"></span>
-      </vscode-button>
-      <span class="status-text">${(x) => x.statusText}</span>
-      <div class="toolbar-right">
-        ${when(
-          (x) => x.packages.length > 0,
-          html<ConsolidateView>`
-            <vscode-button
-              @click=${(x) => x.ConsolidateAll()}
-              ?disabled=${(x) => x.isConsolidating}
-            >
-              Consolidate All
-            </vscode-button>
-          `
-        )}
-      </div>
-    </div>
-
-    ${when(
-      (x) => x.isLoading,
-      html<ConsolidateView>`
-        <div class="loading">
-          <vscode-progress-ring class="loader"></vscode-progress-ring>
-          <span>Checking for inconsistencies...</span>
-        </div>
-      `
-    )}
-
-    ${when(
-      (x) => !x.isLoading && x.packages.length === 0 && !x.hasError,
-      html<ConsolidateView>`
-        <div class="empty">
-          <span class="codicon codicon-check"></span>
-          All package versions are consistent
-        </div>
-      `
-    )}
-
-    ${when(
-      (x) => x.hasError,
-      html<ConsolidateView>`
-        <div class="error">
-          <span class="codicon codicon-error"></span>
-          Failed to check for inconsistencies
-        </div>
-      `
-    )}
-
-    ${when(
-      (x) => !x.isLoading && x.packages.length > 0,
-      html<ConsolidateView>`
-        <div class="package-list">
-          ${repeat(
-            (x) => x.packages,
-            html<InconsistentPackageViewModel>`
-              <div class="inconsistent-row ${(x) => (x.IsConsolidating ? 'consolidating' : '')}">
-                <div class="row-header">
-                  <span class="package-name">${(x) => x.Id}</span>
-                  ${when(
-                    (x) => x.CpmManaged,
-                    html<InconsistentPackageViewModel>`
-                      <span class="cpm-badge">CPM Override</span>
-                    `
-                  )}
-                  <div class="row-actions">
-                    ${when(
-                      (x) => x.IsConsolidating,
-                      html<InconsistentPackageViewModel>`<vscode-progress-ring class="row-loader"></vscode-progress-ring>`,
-                      html<InconsistentPackageViewModel>`
-                        <vscode-dropdown
-                          class="version-dropdown"
-                          :value=${(x) => x.TargetVersion}
-                          @change=${(x, c) => {
-                            x.TargetVersion = (c.event.target as HTMLInputElement).value;
-                          }}
-                        >
-                          ${repeat(
-                            (x) => x.Versions.map((v) => v.Version),
-                            html<string>`<vscode-option>${(x) => x}</vscode-option>`
-                          )}
-                        </vscode-dropdown>
-                        <vscode-button
-                          appearance="icon"
-                          @click=${(x, c) => (c.parent as ConsolidateView).ConsolidateSingle(x)}
-                        >
-                          <span class="codicon codicon-arrow-circle-up"></span>
-                        </vscode-button>
-                      `
-                    )}
-                  </div>
-                </div>
-                <div class="version-details">
-                  ${repeat(
-                    (x) => x.Versions,
-                    html<{ Version: string; Projects: Array<{ Name: string; Path: string }> }>`
-                      <div class="version-row">
-                        <span class="version">${(x) => x.Version}</span>
-                        <span class="projects">${(x) => x.Projects.map((p) => p.Name).join(", ")}</span>
-                      </div>
-                    `
-                  )}
-                </div>
-              </div>
-            `
-          )}
-        </div>
-      `
-    )}
-  </div>
-`;
-
-const styles = css`
-  .consolidate-container {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-    overflow: hidden;
-
-    .toolbar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 4px;
-      margin-bottom: 6px;
-
-      .status-text {
-        font-size: 12px;
-        color: var(--vscode-descriptionForeground);
-        flex: 1;
-      }
-
-      .toolbar-right {
+@customElement("consolidate-view")
+export class ConsolidateView extends LitElement {
+  static styles = [
+    codicon,
+    scrollableBase,
+    css`
+      .consolidate-container {
         display: flex;
-        align-items: center;
-        gap: 8px;
-      }
-    }
+        flex-direction: column;
+        height: 100%;
+        overflow: hidden;
 
-    .loading {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 8px;
-      margin-top: 32px;
-      color: var(--vscode-descriptionForeground);
-      font-size: 12px;
-    }
-
-    .empty {
-      display: flex;
-      gap: 6px;
-      justify-content: center;
-      margin-top: 32px;
-      color: var(--vscode-descriptionForeground);
-    }
-
-    .error {
-      display: flex;
-      gap: 4px;
-      justify-content: center;
-      margin-top: 32px;
-      color: var(--vscode-errorForeground);
-    }
-
-    .package-list {
-      overflow-y: auto;
-      flex: 1;
-    }
-
-    .inconsistent-row {
-      padding: 6px;
-      border-bottom: 1px solid var(--vscode-panelSection-border);
-
-      &.consolidating {
-        opacity: 0.6;
-      }
-
-      .row-header {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-
-        .package-name {
-          font-weight: bold;
-          font-size: 13px;
-          flex: 1;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-
-        .cpm-badge {
-          font-size: 10px;
-          padding: 1px 4px;
-          border-radius: 3px;
-          background-color: var(--vscode-badge-background);
-          color: var(--vscode-badge-foreground);
-        }
-
-        .row-actions {
+        .toolbar {
           display: flex;
           align-items: center;
-          gap: 4px;
-
-          .version-dropdown {
-            min-width: 100px;
-          }
-
-          .row-loader {
-            height: 16px;
-            width: 16px;
-          }
-        }
-      }
-
-      .version-details {
-        margin-top: 4px;
-        padding-left: 4px;
-
-        .version-row {
-          display: flex;
           gap: 8px;
-          font-size: 11px;
-          padding: 2px 0;
+          padding: 4px;
+          margin-bottom: 6px;
 
-          .version {
-            min-width: 60px;
-            color: var(--vscode-charts-yellow);
-            font-family: var(--vscode-editor-font-family);
+          .status-text {
+            font-size: 12px;
+            color: var(--vscode-descriptionForeground);
+            flex: 1;
           }
 
-          .projects {
-            color: var(--vscode-descriptionForeground);
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
+          .toolbar-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          }
+        }
+
+        .loading {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 8px;
+          margin-top: 32px;
+          color: var(--vscode-descriptionForeground);
+          font-size: 12px;
+        }
+
+        .empty {
+          display: flex;
+          gap: 6px;
+          justify-content: center;
+          margin-top: 32px;
+          color: var(--vscode-descriptionForeground);
+        }
+
+        .error {
+          display: flex;
+          gap: 4px;
+          justify-content: center;
+          margin-top: 32px;
+          color: var(--vscode-errorForeground);
+        }
+
+        .package-list {
+          overflow-y: auto;
+          flex: 1;
+        }
+
+        .inconsistent-row {
+          padding: 6px;
+          border-bottom: 1px solid var(--vscode-panelSection-border);
+
+          &.consolidating {
+            opacity: 0.6;
+          }
+
+          .row-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+
+            .package-name {
+              font-weight: bold;
+              font-size: 13px;
+              flex: 1;
+              overflow: hidden;
+              text-overflow: ellipsis;
+              white-space: nowrap;
+            }
+
+            .cpm-badge {
+              font-size: 10px;
+              padding: 1px 4px;
+              border-radius: 3px;
+              background-color: var(--vscode-badge-background);
+              color: var(--vscode-badge-foreground);
+            }
+
+            .row-actions {
+              display: flex;
+              align-items: center;
+              gap: 4px;
+
+              .version-dropdown {
+                min-width: 100px;
+              }
+            }
+          }
+
+          .version-details {
+            margin-top: 4px;
+            padding-left: 4px;
+
+            .version-row {
+              display: flex;
+              gap: 8px;
+              font-size: 11px;
+              padding: 2px 0;
+
+              .version {
+                min-width: 60px;
+                color: var(--vscode-charts-yellow);
+                font-family: var(--vscode-editor-font-family);
+              }
+
+              .projects {
+                color: var(--vscode-descriptionForeground);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+              }
+            }
           }
         }
       }
-    }
-  }
-`;
 
-@customElement({
-  name: "consolidate-view",
-  template,
-  styles: [codicon, scrollableBase, styles],
-})
-export class ConsolidateView extends FASTElement {
-  @IMediator mediator!: IMediator;
-  @observable packages: Array<InconsistentPackageViewModel> = [];
-  @observable isLoading: boolean = false;
-  @observable isConsolidating: boolean = false;
-  @observable hasError: boolean = false;
-  @observable statusText: string = "";
-  @observable projectPaths: string[] = [];
+      button {
+        background: var(--vscode-button-background);
+        color: var(--vscode-button-foreground);
+        border: none;
+        padding: 4px 12px;
+        cursor: pointer;
+      }
 
-  async LoadInconsistentPackages() {
+      button.icon-btn {
+        background: transparent;
+        border: none;
+        color: var(--vscode-icon-foreground);
+        cursor: pointer;
+        padding: 2px;
+      }
+
+      select {
+        background: var(--vscode-dropdown-background);
+        color: var(--vscode-dropdown-foreground);
+        border: 1px solid var(--vscode-dropdown-border);
+        padding: 4px;
+      }
+
+      .spinner {
+        display: inline-block;
+        border: 2px solid var(--vscode-progressBar-background);
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .spinner.small {
+        width: 12px;
+        height: 12px;
+      }
+      .spinner.medium {
+        width: 16px;
+        height: 16px;
+      }
+      .spinner.large {
+        width: 20px;
+        height: 20px;
+      }
+    `,
+  ];
+
+  @state() packages: InconsistentPackageViewModel[] = [];
+  @state() isLoading: boolean = false;
+  @state() isConsolidating: boolean = false;
+  @state() hasError: boolean = false;
+  @state() statusText: string = "";
+  @state() projectPaths: string[] = [];
+
+  async LoadInconsistentPackages(): Promise<void> {
     this.isLoading = true;
     this.hasError = false;
     this.packages = [];
 
     try {
-      const result = await this.mediator.PublishAsync<
-        GetInconsistentPackagesRequest,
-        GetInconsistentPackagesResponse
-      >(GET_INCONSISTENT_PACKAGES, {
+      const result = await hostApi.getInconsistentPackages({
         ProjectPaths: this.projectPaths.length > 0 ? this.projectPaths : undefined,
       });
 
-      if (result.IsFailure) {
+      if (!result.ok) {
         this.hasError = true;
         this.statusText = "Failed to check";
       } else {
-        this.packages = (result.Packages ?? []).map(
+        this.packages = (result.value.Packages ?? []).map(
           (p) => new InconsistentPackageViewModel(p)
         );
         this.statusText =
@@ -310,21 +223,17 @@ export class ConsolidateView extends FASTElement {
     }
   }
 
-  async ConsolidateSingle(pkg: InconsistentPackageViewModel) {
+  private async consolidateSingle(pkg: InconsistentPackageViewModel): Promise<void> {
     pkg.IsConsolidating = true;
+    this.requestUpdate();
     try {
-      const allProjects = pkg.Versions.flatMap((v) =>
-        v.Projects.map((p) => p.Path)
-      );
+      const allProjects = pkg.Versions.flatMap((v) => v.Projects.map((p) => p.Path));
 
-      await this.mediator.PublishAsync<ConsolidateRequest, ConsolidateResponse>(
-        CONSOLIDATE_PACKAGES,
-        {
-          PackageId: pkg.Id,
-          TargetVersion: pkg.TargetVersion,
-          ProjectPaths: allProjects,
-        }
-      );
+      await hostApi.consolidatePackages({
+        PackageId: pkg.Id,
+        TargetVersion: pkg.TargetVersion,
+        ProjectPaths: allProjects,
+      });
 
       this.packages = this.packages.filter((p) => p.Id !== pkg.Id);
       this.statusText =
@@ -333,14 +242,21 @@ export class ConsolidateView extends FASTElement {
           : "All versions are consistent";
     } finally {
       pkg.IsConsolidating = false;
+      this.requestUpdate();
     }
   }
 
-  async ConsolidateAll() {
+  private async consolidateAll(): Promise<void> {
+    const confirm = await hostApi.showConfirmation({
+      Message: `Consolidate ${this.packages.length} package${this.packages.length !== 1 ? "s" : ""}?`,
+      Detail: "This will update all inconsistent packages to their target versions.",
+    });
+    if (!confirm.ok || !confirm.value.Confirmed) return;
+
     this.isConsolidating = true;
     try {
       for (const pkg of this.packages) {
-        await this.ConsolidateSingle(pkg);
+        await this.consolidateSingle(pkg);
       }
     } finally {
       this.isConsolidating = false;
@@ -348,4 +264,103 @@ export class ConsolidateView extends FASTElement {
     }
   }
 
+  private renderPackageRow(pkg: InconsistentPackageViewModel): unknown {
+    return html`
+      <div class="inconsistent-row ${pkg.IsConsolidating ? "consolidating" : ""}">
+        <div class="row-header">
+          <span class="package-name">${pkg.Id}</span>
+          ${pkg.CpmManaged ? html`<span class="cpm-badge">CPM Override</span>` : nothing}
+          <div class="row-actions">
+            ${pkg.IsConsolidating
+              ? html`<span class="spinner medium"></span>`
+              : html`
+                  <select
+                    class="version-dropdown"
+                    aria-label="Target version for ${pkg.Id}"
+                    .value=${pkg.TargetVersion}
+                    @change=${(e: Event) => {
+                      pkg.TargetVersion = (e.target as HTMLSelectElement).value;
+                      this.requestUpdate();
+                    }}
+                  >
+                    ${pkg.Versions.map(
+                      (v) => html`<option value=${v.Version}>${v.Version}</option>`
+                    )}
+                  </select>
+                  <button class="icon-btn" aria-label="Consolidate ${pkg.Id}" title="Consolidate ${pkg.Id}" @click=${() => this.consolidateSingle(pkg)}>
+                    <span class="codicon codicon-arrow-circle-up"></span>
+                  </button>
+                `}
+          </div>
+        </div>
+        <div class="version-details">
+          ${pkg.Versions.map(
+            (v) => html`
+              <div class="version-row">
+                <span class="version">${v.Version}</span>
+                <span class="projects">${v.Projects.map((p) => p.Name).join(", ")}</span>
+              </div>
+            `
+          )}
+        </div>
+      </div>
+    `;
+  }
+
+  render(): unknown {
+    return html`
+      <div class="consolidate-container" aria-busy=${this.isLoading}>
+        <div class="toolbar">
+          <button class="icon-btn" aria-label="Refresh inconsistencies" title="Refresh" @click=${() => this.LoadInconsistentPackages()}>
+            <span class="codicon codicon-refresh"></span>
+          </button>
+          <span class="status-text" role="status" aria-live="polite">${this.statusText}</span>
+          <div class="toolbar-right">
+            ${this.packages.length > 0
+              ? html`
+                  <button
+                    ?disabled=${this.isConsolidating}
+                    @click=${() => this.consolidateAll()}
+                  >
+                    Consolidate All
+                  </button>
+                `
+              : nothing}
+          </div>
+        </div>
+
+        ${this.isLoading
+          ? html`
+              <div class="loading" role="status" aria-label="Loading">
+                <span class="spinner large"></span>
+                <span>Checking for inconsistencies...</span>
+              </div>
+            `
+          : nothing}
+        ${!this.isLoading && this.packages.length === 0 && !this.hasError
+          ? html`
+              <div class="empty">
+                <span class="codicon codicon-check"></span>
+                All package versions are consistent
+              </div>
+            `
+          : nothing}
+        ${this.hasError
+          ? html`
+              <div class="error" role="alert">
+                <span class="codicon codicon-error"></span>
+                Failed to check for inconsistencies
+              </div>
+            `
+          : nothing}
+        ${!this.isLoading && this.packages.length > 0
+          ? html`
+              <div class="package-list" role="list" aria-label="Inconsistent packages">
+                ${this.packages.map((pkg) => this.renderPackageRow(pkg))}
+              </div>
+            `
+          : nothing}
+      </div>
+    `;
+  }
 }

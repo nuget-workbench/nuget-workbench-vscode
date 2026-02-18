@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { Logger } from '../../common/logger';
-import { GetPackage } from '../handlers/get-package';
+import NuGetConfigResolver from './nuget-config-resolver';
+import nugetApiFactory from '../nuget/api-factory';
 
 export class PackageVersionDecorator implements vscode.Disposable {
     private _disposables: vscode.Disposable[] = [];
@@ -22,8 +23,8 @@ export class PackageVersionDecorator implements vscode.Disposable {
 
         // Listen for configuration changes
         this._disposables.push(vscode.workspace.onDidChangeConfiguration(e => {
-            if (e.affectsConfiguration('NugetGallery.enablePackageVersionInlineInfo') || 
-                e.affectsConfiguration('NugetGallery.prerelease')) {
+            if (e.affectsConfiguration('NugetWorkbench.enablePackageVersionInlineInfo') ||
+                e.affectsConfiguration('NugetWorkbench.prerelease')) {
                 this.updateConfiguration();
                 if (vscode.window.activeTextEditor) {
                     this.triggerUpdateDecorations(vscode.window.activeTextEditor);
@@ -52,7 +53,7 @@ export class PackageVersionDecorator implements vscode.Disposable {
     }
 
     private updateConfiguration() {
-        const config = vscode.workspace.getConfiguration('NugetGallery');
+        const config = vscode.workspace.getConfiguration('NugetWorkbench');
         this._isEnabled = config.get<boolean>('enablePackageVersionInlineInfo', false);
         this._prerelease = config.get<boolean>('prerelease', false);
         Logger.debug(`PackageVersionDecorator.updateConfiguration: Configuration updated, enabled=${this._isEnabled}, prerelease=${this._prerelease}`);
@@ -152,20 +153,29 @@ export class PackageVersionDecorator implements vscode.Disposable {
         Logger.debug(`PackageVersionDecorator.fetchAndDecorate: Fetching versions for ${Array.from(packageIds).join(', ')}`);
         const decorations: vscode.DecorationOptions[] = [];
 
-        const getPackageHandler = new GetPackage();
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const sources = await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot);
 
         const promises = Array.from(packageIds).map(async (packageId) => {
              if (this._failedCache.has(packageId)) return;
 
              try {
-                 const result = await getPackageHandler.HandleAsync({
-                     Id: packageId,
-                     Url: '',
-                     Prerelease: this._prerelease
-                 });
+                 let latestVersion: string | null = null;
 
-                 if (!result.IsFailure && result.Package) {
-                    const latestVersion = result.Package.Version;
+                 for (const source of sources) {
+                     try {
+                         const api = await nugetApiFactory.GetSourceApi(source.Url);
+                         const result = await api.GetPackageAsync(packageId, this._prerelease);
+                         if (!result.isError && result.data) {
+                             latestVersion = result.data.Version;
+                             break;
+                         }
+                     } catch {
+                         // Try next source
+                     }
+                 }
+
+                 if (latestVersion) {
                     const positions = packagePositions.get(packageId);
                     if (positions) {
                         for (const pos of positions) {

@@ -1,42 +1,9 @@
 import * as vscode from "vscode";
-import HostBus from "./messaging/host-bus";
 import nonce from "@/common/nonce";
-import Mediator from "@/common/messaging/core/mediator";
-import { IMediator } from "@/web/registrations";
-import { IBus } from "@/common/messaging/core/types";
-import {
-  GET_CONFIGURATION,
-  GET_PACKAGE,
-  GET_PACKAGES,
-  GET_PACKAGE_DETAILS,
-  GET_PROJECTS,
-  OPEN_URL,
-  SHOW_SETTINGS,
-  UPDATE_CONFIGURATION,
-  UPDATE_PROJECT,
-  UPDATE_STATUS_BAR,
-  GET_OUTDATED_PACKAGES,
-  BATCH_UPDATE_PACKAGES,
-  GET_INCONSISTENT_PACKAGES,
-  CONSOLIDATE_PACKAGES,
-} from "@/common/messaging/core/commands";
-import { GetProjects } from "./handlers/get-projects";
-import { GetPackages } from "./handlers/get-packages";
-import UpdateProject from "./handlers/update-project";
-import GetConfiguration from "./handlers/get-configuration";
-import UpdateConfiguration from "./handlers/update-configuration";
-import OpenUrl from "./handlers/open-url";
-import { GetPackageDetails } from "./handlers/get-package-details";
-import { GetPackage } from "./handlers/get-package";
-import { UpdateStatusBar } from "./handlers/update-status-bar";
-import { GetOutdatedPackages } from "./handlers/get-outdated-packages";
-import { BatchUpdatePackages } from "./handlers/batch-update-packages";
-import { GetInconsistentPackages } from "./handlers/get-inconsistent-packages";
-import { ConsolidatePackages } from "./handlers/consolidate-packages";
+import { RpcHost } from "@/common/rpc/rpc-host";
+import { createHostAPI } from "./host-api";
 import { Logger } from "../common/logger";
 import { PackageVersionDecorator } from "./utilities/package-version-decorator";
-
-let mediator: IMediator;
 
 export function activate(context: vscode.ExtensionContext) {
   Logger.configure(context);
@@ -45,60 +12,46 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(new PackageVersionDecorator());
 
-  const previousVersion: string | undefined = context.globalState.get("NugetGallery.version");
-  context.globalState.update("NugetGallery.version", context.extension.packageJSON.version);
+  const previousVersion: string | undefined = context.globalState.get("NugetWorkbench.version");
+  context.globalState.update("NugetWorkbench.version", context.extension.packageJSON.version);
   if (previousVersion == undefined) {
     Logger.info("Extension.activate: Extension installed");
   } else if (previousVersion != context.extension.packageJSON.version)
     Logger.info("Extension.activate: Extension upgraded from version %s", previousVersion);
 
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider("nuget.gallery.view", provider, {
+    vscode.window.registerWebviewViewProvider("nuget.workbench.view", provider, {
       webviewOptions: {
         retainContextWhenHidden: true,
       },
     })
   );
   context.subscriptions.push(
-    vscode.commands.registerCommand("nuget-gallery.openSettings", async () => {
-      await mediator?.PublishAsync<ShowSettingsRequest, ShowSettingsResponse>(SHOW_SETTINGS, {});
-    })
-  );
-  context.subscriptions.push(
-    vscode.commands.registerCommand("nuget-gallery.reportProblem", async () => {
+    vscode.commands.registerCommand("nuget-workbench.reportProblem", async () => {
       vscode.env.openExternal(
-        vscode.Uri.parse("https://github.com/shis91/vscode-nuget-gallery/issues/new")
+        vscode.Uri.parse("https://github.com/daniel-rck/nuget-workbench/issues/new")
       );
     })
   );
 }
 
 class NugetViewProvider implements vscode.WebviewViewProvider {
+  private rpcHost: RpcHost | undefined;
+
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
   resolveWebviewView(
     webviewView: vscode.WebviewView,
-    context: vscode.WebviewViewResolveContext,
-    token: vscode.CancellationToken
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
   ): void | Thenable<void> {
     Logger.debug("NugetViewProvider.resolveWebviewView: Resolving webview view");
-    const hostBus: IBus = new HostBus(webviewView.webview);
-    mediator = new Mediator(hostBus);
 
-    mediator
-      .AddHandler(GET_PROJECTS, new GetProjects())
-      .AddHandler(GET_PACKAGES, new GetPackages())
-      .AddHandler(GET_PACKAGE, new GetPackage())
-      .AddHandler(UPDATE_PROJECT, new UpdateProject())
-      .AddHandler(GET_CONFIGURATION, new GetConfiguration())
-      .AddHandler(UPDATE_CONFIGURATION, new UpdateConfiguration())
-      .AddHandler(GET_PACKAGE_DETAILS, new GetPackageDetails())
-      .AddHandler(OPEN_URL, new OpenUrl())
-      .AddHandler(UPDATE_STATUS_BAR, new UpdateStatusBar())
-      .AddHandler(GET_OUTDATED_PACKAGES, new GetOutdatedPackages())
-      .AddHandler(BATCH_UPDATE_PACKAGES, new BatchUpdatePackages())
-      .AddHandler(GET_INCONSISTENT_PACKAGES, new GetInconsistentPackages())
-      .AddHandler(CONSOLIDATE_PACKAGES, new ConsolidatePackages());
+    // Dispose previous RPC host if webview is re-resolved
+    this.rpcHost?.dispose();
+
+    const api = createHostAPI();
+    this.rpcHost = new RpcHost(webviewView.webview, api);
 
     const webJsSrc = webviewView.webview.asWebviewUri(
       vscode.Uri.joinPath(this._extensionUri, ...["dist", "web.js"])
@@ -116,10 +69,10 @@ class NugetViewProvider implements vscode.WebviewViewProvider {
       <meta name="viewport" content="width=device-width,initial-scale=1.0">
       <meta http-equiv="Content-Security-Policy" content="script-src 'nonce-${nonceValue}';">
       <link rel="stylesheet" type="text/css" href="${webCssSrc}"/>
-		  <title>NuGet Gallery</title>
+		  <title>NuGet Workbench</title>
 		</head>
 		<body>
-		  <vscode-nuget-gallery></vscode-nuget-gallery>
+		  <nuget-workbench></nuget-workbench>
 		  <script type="module" nonce="${nonceValue}" src="${webJsSrc}"></script>
 		</body>
 	  </html>

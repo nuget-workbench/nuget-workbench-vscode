@@ -1,83 +1,45 @@
-import registrations, { Configuration, Router } from "./registrations";
-import {
-  provideVSCodeDesignSystem,
-  vsCodeButton,
-  vsCodeCheckbox,
-  vsCodeTextField,
-  vsCodeDropdown,
-  vsCodeOption,
-  vsCodePanels,
-  vsCodePanelView,
-  vsCodePanelTab,
-  vsCodeProgressRing,
-  vsCodeLink,
-} from "@vscode/webview-ui-toolkit";
+import { LitElement, html } from "lit";
+import { customElement, state } from "lit/decorators.js";
+import { configuration, router } from "./registrations";
 
-import { FASTElement, customElement, html, css, when } from "@microsoft/fast-element";
-
-import { PackagesView } from "./components/packages-view";
-import { PackageRow } from "./components/package-row";
-import { ProjectRow } from "./components/project-row";
-import { SettingsView } from "./components/settings-view";
-import { PackageDetailsComponent } from "./components/package-details";
+// Import all Lit components (they self-register via @customElement)
+import "./components/packages-view";
+import "./components/package-row";
+import "./components/project-row";
+import "./components/settings-view";
+import "./components/package-details";
+import "./components/expandable-container";
+import "./components/search-bar";
+import "./components/updates-view";
+import "./components/consolidate-view";
+import "./components/vulnerabilities-view";
+import "./components/project-tree";
 
 import "./main.css";
-import { ExpandableContainer } from "./components/expandable-container";
-import { SearchBar } from "./components/search-bar";
-import { UpdatesView } from "./components/updates-view";
-import { ConsolidateView } from "./components/consolidate-view";
-import { ProjectTree } from "./components/project-tree";
 
-provideVSCodeDesignSystem().register(
-  registrations(),
-  vsCodeButton(),
-  vsCodeCheckbox(),
-  vsCodeTextField(),
-  vsCodePanels(),
-  vsCodePanelView(),
-  vsCodePanelTab(),
-  vsCodeDropdown(),
-  vsCodeOption(),
-  vsCodeProgressRing(),
-  vsCodeLink(),
-  PackagesView,
-  PackageRow,
-  ProjectRow,
-  SettingsView,
-  PackageDetailsComponent,
-  ExpandableContainer,
-  SearchBar,
-  UpdatesView,
-  ConsolidateView,
-  ProjectTree
-);
+@customElement("nuget-workbench")
+export class NuGetWorkbench extends LitElement {
+  @state() private configLoaded = false;
+  @state() private currentRoute = router.CurrentRoute;
 
-const template = html<VSCodeNuGetGallery>`
-  ${when(
-    (x) => x.configuration.Configuration != null,
-    html<VSCodeNuGetGallery>`
-      ${when(
-        (x) => x.router.CurrentRoute == "BROWSE",
-        html`<packages-view></packages-view>`,
-        html`<settings-view></settings-view>`
-      )}
-    `
-  )}
-`;
-
-const styles = css``;
-
-@customElement({
-  name: "vscode-nuget-gallery",
-  template,
-  styles,
-})
-export class VSCodeNuGetGallery extends FASTElement {
-  @Router router!: Router;
-  @Configuration configuration!: Configuration;
-
-  connectedCallback(): void {
+  connectedCallback() {
     super.connectedCallback();
-    this.configuration.Reload();
+    configuration.addEventListener("configuration-changed", () => {
+      this.configLoaded = configuration.Configuration != null;
+    });
+    router.addEventListener("route-changed", () => {
+      this.currentRoute = router.CurrentRoute;
+    });
+    configuration.Reload();
+  }
+
+  render() {
+    if (!this.configLoaded) {
+      return html``;
+    }
+    if (this.currentRoute === "SETTINGS") {
+      return html`<settings-view></settings-view>`;
+    }
+    return html`<packages-view></packages-view>`;
   }
 }

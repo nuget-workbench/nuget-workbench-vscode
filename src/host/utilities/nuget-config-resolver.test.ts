@@ -151,7 +151,7 @@ suite('NuGetConfigResolver Tests', () => {
     // ... Rest of the tests (ParseConfigFile, etc.) are file-path independent or use paths we pass directly ...
 
     suite('ParseConfigFile', () => {
-        test('Parses sources correctly', () => {
+        test('Parses sources correctly', async () => {
             const xml = `
                 <configuration>
                     <packageSources>
@@ -162,7 +162,7 @@ suite('NuGetConfigResolver Tests', () => {
             `;
             const configFile = writeConfig(tempDir, 'test.config', xml);
 
-            const result = (NuGetConfigResolver as any).ParseConfigFile(configFile);
+            const result = await (NuGetConfigResolver as any).ParseConfigFile(configFile);
             assert.strictEqual(result.sources.length, 2);
             assert.strictEqual(result.sources[0].Name, 'Source1');
             assert.strictEqual(result.sources[0].Url, 'http://source1');
@@ -170,7 +170,7 @@ suite('NuGetConfigResolver Tests', () => {
             assert.strictEqual(result.sources[1].Url, 'http://source2');
         });
 
-        test('Parses credentials correctly', () => {
+        test('Parses credentials correctly', async () => {
             const xml = `
                 <configuration>
                     <packageSourceCredentials>
@@ -183,12 +183,12 @@ suite('NuGetConfigResolver Tests', () => {
             `;
             const configFile = writeConfig(tempDir, 'creds.config', xml);
 
-            const result = (NuGetConfigResolver as any).ParseConfigFile(configFile);
+            const result = await (NuGetConfigResolver as any).ParseConfigFile(configFile);
             assert.strictEqual(result.credentials.get('Source1').Username, 'user1');
             assert.strictEqual(result.credentials.get('Source1').Password, 'pass1');
         });
 
-        test('Handles disabled sources', () => {
+        test('Handles disabled sources', async () => {
              const xml = `
                 <configuration>
                     <disabledPackageSources>
@@ -198,11 +198,11 @@ suite('NuGetConfigResolver Tests', () => {
             `;
             const configFile = writeConfig(tempDir, 'disabled.config', xml);
 
-             const result = (NuGetConfigResolver as any).ParseConfigFile(configFile);
+             const result = await (NuGetConfigResolver as any).ParseConfigFile(configFile);
              assert.ok(result.disabledSources.includes('Source1'));
         });
 
-        test('Detects clear tag', () => {
+        test('Detects clear tag', async () => {
             const xml = `
                 <configuration>
                     <packageSources>
@@ -213,22 +213,22 @@ suite('NuGetConfigResolver Tests', () => {
             `;
              const configFile = writeConfig(tempDir, 'clear.config', xml);
 
-             const result = (NuGetConfigResolver as any).ParseConfigFile(configFile);
+             const result = await (NuGetConfigResolver as any).ParseConfigFile(configFile);
              assert.strictEqual(result.clear, true);
         });
 
-        test('Handles malformed XML gracefully', () => {
+        test('Handles malformed XML gracefully', async () => {
              const xml = `<configuration><packageSources><add key="`;
              const configFile = writeConfig(tempDir, 'malformed.config', xml);
 
-             const result = (NuGetConfigResolver as any).ParseConfigFile(configFile);
+             const result = await (NuGetConfigResolver as any).ParseConfigFile(configFile);
              assert.ok(result);
         });
     });
 
     suite('GetSourcesWithCredentials', () => {
-        test('Returns empty list if no config files found', () => {
-            const sources = NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+        test('Returns empty list if no config files found', async () => {
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
             // It might pick up user/machine configs if homedir spoofing failed and real ones exist.
             // But usually in CI/test env there are none.
             // If there are, we can't easily assert empty.
@@ -241,7 +241,7 @@ suite('NuGetConfigResolver Tests', () => {
             assert.ok(Array.isArray(sources));
         });
 
-        test('Merges sources and handles disabled sources', () => {
+        test('Merges sources and handles disabled sources', async () => {
             const xml = `
                 <configuration>
                     <packageSources>
@@ -255,7 +255,7 @@ suite('NuGetConfigResolver Tests', () => {
             `;
             writeConfig(workspaceDir, 'nuget.config', xml);
 
-            const sources = NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
             const source1 = sources.find(s => s.Name === 'Source1');
             assert.ok(source1);
 
@@ -263,7 +263,7 @@ suite('NuGetConfigResolver Tests', () => {
             assert.strictEqual(source2, undefined);
         });
 
-        test('Maps credentials to sources', () => {
+        test('Maps credentials to sources', async () => {
             const xml = `
                 <configuration>
                     <packageSources>
@@ -279,14 +279,14 @@ suite('NuGetConfigResolver Tests', () => {
             `;
             writeConfig(workspaceDir, 'nuget.config', xml);
 
-            const sources = NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
             const source1 = sources.find(s => s.Name === 'Source1');
             assert.ok(source1);
             assert.strictEqual(source1?.Username, 'user');
             assert.strictEqual(source1?.Password, 'pass');
         });
 
-        test('Clears sources when <clear /> is present', () => {
+        test('Clears sources when <clear /> is present', async () => {
             // Setup User config with Source1
             if (os.homedir() === homeDir) {
                 writeConfig(homeDir, '.nuget/NuGet/NuGet.Config', `
@@ -308,7 +308,7 @@ suite('NuGetConfigResolver Tests', () => {
                 </configuration>
             `);
 
-            const sources = NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
 
             const source2 = sources.find(s => s.Name === 'Source2');
             assert.ok(source2);
@@ -322,11 +322,11 @@ suite('NuGetConfigResolver Tests', () => {
             }
         });
 
-        test('Handles parsing errors gracefully', () => {
+        test('Handles parsing errors gracefully', async () => {
              const badPath = path.join(workspaceDir, 'nuget.config');
              fs.mkdirSync(badPath);
 
-             const sources = NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+             const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
 
              // Should not throw
              assert.ok(Array.isArray(sources));
@@ -337,7 +337,7 @@ suite('NuGetConfigResolver Tests', () => {
     suite('GetSourcesAndDecodePasswords', () => {
         test('Uses VS Code configuration sources', async () => {
             // Mock empty file sources
-            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').returns([]);
+            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([]);
 
             vscodeGetConfigurationStub.returns({
                 get: (key: string) => {
@@ -356,7 +356,7 @@ suite('NuGetConfigResolver Tests', () => {
 
         test('Decodes password when passwordScriptPath is provided', async () => {
             const source = { Name: 'SecureSource', Url: 'http://secure', Password: 'Encrypted' };
-            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').returns([source]);
+            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([source]);
 
             vscodeGetConfigurationStub.returns({
                 get: (key: string) => {
@@ -379,7 +379,7 @@ suite('NuGetConfigResolver Tests', () => {
 
         test('Handles password decoding failure', async () => {
             const source = { Name: 'SecureSource', Url: 'http://secure', Password: 'Encrypted' };
-            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').returns([source]);
+            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([source]);
 
             vscodeGetConfigurationStub.returns({
                 get: (key: string) => {
@@ -405,7 +405,7 @@ suite('NuGetConfigResolver Tests', () => {
 
         test('Caches credentials even without script', async () => {
              const source = { Name: 'PlainSource', Url: 'http://plain', Username: 'user', Password: 'password' };
-             sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').returns([source]);
+             sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([source]);
              vscodeGetConfigurationStub.returns({ get: () => [] });
 
              await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceDir);

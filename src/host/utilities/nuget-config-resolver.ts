@@ -21,11 +21,11 @@ export default class NuGetConfigResolver {
 
   static async GetSourcesAndDecodePasswords(workspaceRoot?: string): Promise<SourceWithCredentials[]> {
     Logger.debug(`NuGetConfigResolver.GetSourcesAndDecodePasswords: Starting resolution (workspaceRoot: ${workspaceRoot})`);
-    const config = vscode.workspace.getConfiguration("NugetGallery");
+    const config = vscode.workspace.getConfiguration("NugetWorkbench");
     const sourcesMap = new Map<string, SourceWithCredentials>();
     
-    const sourcesWithCreds = this.GetSourcesWithCredentials(workspaceRoot);
-    
+    const sourcesWithCreds = await this.GetSourcesWithCredentials(workspaceRoot);
+
     sourcesWithCreds.forEach(s => {
       sourcesMap.set(s.Name, {
         Name: s.Name,
@@ -92,7 +92,7 @@ export default class NuGetConfigResolver {
     return sources;
   }
 
-  static GetSourcesWithCredentials(workspaceRoot?: string): SourceWithCredentials[] {
+  static async GetSourcesWithCredentials(workspaceRoot?: string): Promise<SourceWithCredentials[]> {
     Logger.debug(`NuGetConfigResolver.GetSourcesWithCredentials: Starting resolution (workspaceRoot: ${workspaceRoot})`);
     const sources = new Map<string, SourceWithCredentials>();
     const disabledSources = new Set<string>();
@@ -104,7 +104,7 @@ export default class NuGetConfigResolver {
     for (const configPath of configPaths) {
       try {
         Logger.debug(`NuGetConfigResolver.GetSourcesWithCredentials: Parsing ${configPath}`);
-        const result = this.ParseConfigFile(configPath);
+        const result = await this.ParseConfigFile(configPath);
         
         if (result.clear) {
           Logger.debug(`NuGetConfigResolver.GetSourcesWithCredentials: 'clear' found in ${configPath}, clearing sources`);
@@ -205,13 +205,13 @@ export default class NuGetConfigResolver {
   }
 
 
-  private static ParseConfigFile(configPath: string): {
+  private static async ParseConfigFile(configPath: string): Promise<{
     sources: SourceWithCredentials[];
     credentials: Map<string, { Username?: string; Password?: string }>;
     disabledSources: string[];
     clear: boolean;
-  } {
-    const content = fs.readFileSync(configPath, "utf8");
+  }> {
+    const content = await fs.promises.readFile(configPath, "utf8");
     const document = new DOMParser().parseFromString(content);
 
     const sources: SourceWithCredentials[] = [];

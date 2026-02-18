@@ -1,4 +1,4 @@
-import { css } from "@microsoft/fast-element";
+import { css } from "lit";
 
 export default css`
   @font-face {
