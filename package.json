@@ -23,20 +23,42 @@
     "vulnerability"
   ],
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Other"
   ],
+  "homepage": "https://github.com/nuget-workbench/nuget-workbench-vscode",
   "bugs": {
-    "url": "https://github.com/daniel-rck/nuget-workbench/issues",
+    "url": "https://github.com/nuget-workbench/nuget-workbench-vscode/issues",
     "email": "daniel-rck@proton.me"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/daniel-rck/nuget-workbench.git"
+    "url": "https://github.com/nuget-workbench/nuget-workbench-vscode.git"
   },
-  "activationEvents": [],
+  "activationEvents": [
+    "workspaceContains:**/*.csproj",
+    "workspaceContains:**/*.fsproj",
+    "workspaceContains:**/*.sln"
+  ],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
+      {
+        "command": "nugetWorkbench.open",
+        "title": "NuGet Workbench: Open Packages"
+      },
+      {
+        "command": "nugetWorkbench.install",
+        "title": "NuGet Workbench: Add Package"
+      },
+      {
+        "command": "nugetWorkbench.update",
+        "title": "NuGet Workbench: Update Package"
+      },
+      {
+        "command": "nugetWorkbench.remove",
+        "title": "NuGet Workbench: Remove Package"
+      },
       {
         "command": "nuget-workbench.openSettings",
         "title": "Settings",
@@ -52,12 +74,12 @@
       "view/title": [
         {
           "command": "nuget-workbench.reportProblem",
-          "when": "view == nuget.workbench.view",
+          "when": "view == nugetWorkbench.packageView",
           "group": "navigation@1"
         },
         {
           "command": "nuget-workbench.openSettings",
-          "when": "view == nuget.workbench.view",
+          "when": "view == nugetWorkbench.packageView",
           "group": "navigation@2"
         }
       ]
@@ -75,17 +97,32 @@
       "nugetWorkbenchView": [
         {
           "type": "webview",
-          "id": "nuget.workbench.view",
-          "name": "NuGet"
+          "id": "nugetWorkbench.packageView",
+          "name": "NuGet Packages"
         }
       ]
     },
     "configuration": {
       "title": "NuGet Workbench",
       "properties": {
+        "nugetWorkbench.defaultSource": {
+          "type": "string",
+          "default": "",
+          "description": "Default package source URL. If empty, uses the default from nuget.config."
+        },
+        "nugetWorkbench.pageSize": {
+          "type": "number",
+          "default": 20,
+          "description": "Number of packages per search page."
+        },
+        "nugetWorkbench.showOutputOnError": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically expand the output log when an operation fails."
+        },
         "NugetWorkbench.skipRestore": {
           "type": "boolean",
-          "default": "false",
+          "default": false,
           "description": "Skip performing a restore preview and compatibility check"
         },
         "NugetWorkbench.sources": {
@@ -136,7 +173,7 @@
     "test": "vscode-test",
     "esbuild": "node ./esbuild.js",
     "test-compile": "tsc -p ./tsconfig.test.json",
-    "package": "vsce package --out releases/"
+    "package": "vsce package --no-dependencies --out releases/"
   },
   "devDependencies": {
     "@types/jsdom": "^27.0.0",

@@ -9,9 +9,12 @@ import codicon from "@/web/styles/codicon.css";
 import { scrollableBase } from "@/web/styles/base.css";
 import { PackageViewModel, ProjectViewModel } from "../types";
 import type { FilterEvent } from "./search-bar";
+import type { SearchBar } from "./search-bar";
 import type { UpdatesView } from "./updates-view";
 import type { ConsolidateView } from "./consolidate-view";
 import type { VulnerabilitiesView } from "./vulnerabilities-view";
+import type { NugetOutputLog } from "./nuget-output-log";
+import type { NugetLicenseDialog } from "./nuget-license-dialog";
 
 type TabId = "browse" | "installed" | "updates" | "consolidate" | "vulnerabilities";
 
@@ -244,6 +247,7 @@ export class PackagesView extends LitElement {
     Prerelease: true,
     Query: "",
     SourceUrl: "",
+    Sort: "relevance",
   };
   @state() noMorePackages: boolean = false;
   @state() packagesLoadingError: boolean = false;
@@ -347,7 +351,7 @@ export class PackagesView extends LitElement {
     (tabButtons?.[newIdx] as HTMLElement)?.focus();
   }
 
-  private setTab(tab: TabId): void {
+  setTab(tab: TabId): void {
     this.activeTab = tab;
 
     if (tab === "updates") {
@@ -375,6 +379,20 @@ export class PackagesView extends LitElement {
         vulnView.LoadVulnerablePackages();
       }
     }
+  }
+
+  setSearchQuery(query: string): void {
+    this.setTab("browse");
+    const searchBar = this.shadowRoot?.querySelector("search-bar") as SearchBar | null;
+    searchBar?.setSearchQuery(query);
+  }
+
+  get outputLog(): NugetOutputLog | null {
+    return this.shadowRoot?.querySelector("nuget-output-log") as NugetOutputLog | null;
+  }
+
+  get licenseDialog(): NugetLicenseDialog | null {
+    return this.shadowRoot?.querySelector("nuget-license-dialog") as NugetLicenseDialog | null;
   }
 
   private OnProjectSelectionChanged(paths: string[]): void {
@@ -772,6 +790,7 @@ export class PackagesView extends LitElement {
           .packageVersionUrl=${this.PackageVersionUrl}
           .source=${this.selectedPackage?.SourceUrl || this.filters.SourceUrl}
           .passwordScriptPath=${this.CurrentSource?.PasswordScriptPath}
+          .selectedVersion=${this.selectedVersion}
         ></package-details>
         <div class="separator"></div>
         ${this.projects.length > 0
@@ -887,6 +906,8 @@ export class PackagesView extends LitElement {
           ${this.renderSelectedPackagePanel()}
         </div>
       </div>
+      <nuget-output-log></nuget-output-log>
+      <nuget-license-dialog></nuget-license-dialog>
     `;
   }
 }

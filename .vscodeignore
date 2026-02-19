@@ -7,12 +7,15 @@ out/**
 src/**
 docs/raw/**
 .gitignore
+.editorconfig
+.vscode-test.js
+releases/
 .env
 .env.*
 CLAUDE.md
-plan-reboot.md
 vsc-extension-quickstart.md
 esbuild.js
+eslint.config.mjs
 **/tsconfig.json
 **/tsconfig.test.json
 **/*.map
@@ -20,4 +23,3 @@ esbuild.js
 **/node_modules/**
 **/package-lock.json
 **/yarn.lock
-azure-pipelines.yml

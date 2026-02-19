@@ -64,10 +64,13 @@ const styles = css`
   }
 `;
 
+export type SortOption = "relevance" | "downloads" | "recent" | "name-asc";
+
 export type FilterEvent = {
   Query: string;
   Prerelease: boolean;
   SourceUrl: string;
+  Sort: SortOption;
 };
 
 @customElement("search-bar")
@@ -78,6 +81,7 @@ export class SearchBar extends LitElement {
   @state() prerelease: boolean = false;
   @state() filterQuery: string = "";
   @state() selectedSourceUrl: string = "";
+  @state() sortBy: SortOption = "relevance";
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -118,6 +122,18 @@ export class SearchBar extends LitElement {
     this.emitFilterChangedEvent();
   }
 
+  private sortChanged(value: string): void {
+    this.sortBy = value as SortOption;
+    this.emitFilterChangedEvent();
+  }
+
+  setSearchQuery(query: string): void {
+    this.filterQuery = query;
+    const input = this.shadowRoot?.querySelector(".search-input") as HTMLInputElement;
+    if (input) input.value = query;
+    this.emitFilterChangedEvent();
+  }
+
   private reloadClicked(): void {
     const forceReload = true;
     this.dispatchEvent(
@@ -134,6 +150,7 @@ export class SearchBar extends LitElement {
       Query: this.filterQuery,
       Prerelease: this.prerelease,
       SourceUrl: this.selectedSourceUrl,
+      Sort: this.sortBy,
     };
     this.dispatchEvent(
       new CustomEvent("filter-changed", {
@@ -170,6 +187,17 @@ export class SearchBar extends LitElement {
           </label>
         </div>
         <div class="search-bar-right">
+          <select
+            aria-label="Sort by"
+            .value=${this.sortBy}
+            @change=${(e: Event) =>
+              this.sortChanged((e.target as HTMLSelectElement).value)}
+          >
+            <option value="relevance">Relevance</option>
+            <option value="downloads">Downloads</option>
+            <option value="recent">Recently Updated</option>
+            <option value="name-asc">Name A-Z</option>
+          </select>
           <select
             aria-label="Package source"
             .value=${this.selectedSourceUrl}

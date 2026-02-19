@@ -87,8 +87,8 @@ suite('PackageRow Component', () => {
         const authorsElement = shadowRoot.querySelector('.authors');
         assert.ok(authorsElement);
         // PackageViewModel joins authors with ", "
-        // Template adds "@" prefix
-        assert.strictEqual(authorsElement.textContent?.trim(), '@Author1, Author2');
+        // Template adds "by " prefix
+        assert.strictEqual(authorsElement.textContent?.trim(), 'by Author1, Author2');
     });
 
     test('should not render authors if missing (empty array)', async () => {

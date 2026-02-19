@@ -73,7 +73,8 @@ suite('SearchBar Component', () => {
             assert.deepStrictEqual(detail, {
                 Query: "",
                 Prerelease: true,
-                SourceUrl: ""
+                SourceUrl: "",
+                Sort: "relevance",
             });
             done();
         });
@@ -122,11 +123,12 @@ suite('SearchBar Component', () => {
             });
         });
 
-        // Find the select element and change its value
-        const select = searchBar.shadowRoot?.querySelector('select') as HTMLSelectElement;
-        assert.ok(select, 'Source select should exist');
-        select.value = newSource;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
+        // Find the source select (second select element, first is sort)
+        const selects = searchBar.shadowRoot?.querySelectorAll('select');
+        const sourceSelect = selects?.[1] as HTMLSelectElement;
+        assert.ok(sourceSelect, 'Source select should exist');
+        sourceSelect.value = newSource;
+        sourceSelect.dispatchEvent(new Event('change', { bubbles: true }));
 
         await eventPromise;
     });
@@ -177,10 +179,12 @@ suite('SearchBar Component', () => {
         const shadowRoot = searchBar.shadowRoot;
         assert.ok(shadowRoot, "Shadow root should exist");
 
-        const select = shadowRoot.querySelector('select');
-        assert.ok(select, "Select dropdown should exist");
+        // Source select is the second select (first is sort dropdown)
+        const selects = shadowRoot.querySelectorAll('select');
+        assert.strictEqual(selects.length, 2, "Should have sort and source dropdowns");
 
-        const options = select.querySelectorAll('option');
+        const sourceSelect = selects[1];
+        const options = sourceSelect.querySelectorAll('option');
         // Expected: 1 (All) + 2 (Sources) = 3
         assert.strictEqual(options.length, 3);
 

@@ -71,7 +71,7 @@ suite('PackagesView Component', () => {
         packagesView.packages = [];
         packagesView.projects = [];
         packagesView.projectsPackages = [];
-        packagesView.filters = { Prerelease: true, Query: '', SourceUrl: '' };
+        packagesView.filters = { Prerelease: true, Query: '', SourceUrl: '', Sort: 'relevance' };
     });
 
     teardown(() => {
@@ -113,7 +113,8 @@ suite('PackagesView Component', () => {
             packagesView.filters = {
                 Prerelease: true,
                 Query: 'test-query',
-                SourceUrl: 'https://api.nuget.org/v3/index.json'
+                SourceUrl: 'https://api.nuget.org/v3/index.json',
+                Sort: 'relevance',
             };
 
             await packagesView.LoadPackages();
@@ -311,7 +312,8 @@ suite('PackagesView Component', () => {
             const newFilters = {
                 Prerelease: false,
                 Query: 'newtonsoft',
-                SourceUrl: 'https://private.nuget.org'
+                SourceUrl: 'https://private.nuget.org',
+                Sort: 'relevance' as const,
             };
 
             await packagesView.UpdatePackagesFilters(newFilters);
@@ -327,7 +329,8 @@ suite('PackagesView Component', () => {
             await packagesView.UpdatePackagesFilters({
                 Prerelease: false,
                 Query: 'test',
-                SourceUrl: ''
+                SourceUrl: '',
+                Sort: 'relevance',
             });
 
             assert.ok((mockHostApi.getPackages as sinon.SinonStub).called);
@@ -341,7 +344,8 @@ suite('PackagesView Component', () => {
             await packagesView.UpdatePackagesFilters({
                 Prerelease: false, // Changed from true
                 Query: '',
-                SourceUrl: ''
+                SourceUrl: '',
+                Sort: 'relevance',
             });
 
             const callArgs = (mockHostApi.getPackages as sinon.SinonStub).firstCall.args[0];

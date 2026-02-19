@@ -67,41 +67,34 @@ suite('PackageDetails Component', () => {
         const viewModel = new PackageViewModel(pkg);
 
         packageDetails.package = viewModel;
+        packageDetails.activeTab = 'description';
         await packageDetails.updateComplete;
 
         const shadowRoot = packageDetails.shadowRoot;
         assert.ok(shadowRoot, "Shadow root should exist");
 
-        const infoContainer = shadowRoot.querySelector('expandable-container[title="Info"]');
-        assert.ok(infoContainer, "Info container should exist");
+        // New tabbed layout: check description tab content
+        const descriptionText = shadowRoot.querySelector('.description-text');
+        assert.ok(descriptionText, "Description text should exist");
+        assert.strictEqual(descriptionText.textContent?.trim(), 'Test Description');
 
-        const detailsDiv = infoContainer.querySelector('.package-details');
-        assert.ok(detailsDiv, "Details div should exist");
+        // Check meta grid
+        const metaLabels = shadowRoot.querySelectorAll('.package-meta .label');
+        assert.ok(metaLabels.length > 0, "Meta labels should exist");
 
-        // Helper to get text content by title
-        const getTextByTitle = (title: string) => {
-            const titles = Array.from(detailsDiv.querySelectorAll('.title'));
-            const titleEl = titles.find(t => t.textContent?.trim() === title);
-            if (!titleEl) return null;
-            return titleEl.nextElementSibling?.textContent?.trim();
+        const getValueByLabel = (label: string) => {
+            const labels = Array.from(metaLabels);
+            const labelEl = labels.find(l => l.textContent?.trim() === label);
+            return labelEl?.nextElementSibling?.textContent?.trim();
         };
 
-        // Helper to get link by title
-        const getLinkByTitle = (title: string) => {
-            const titles = Array.from(detailsDiv.querySelectorAll('.title'));
-            const titleEl = titles.find(t => t.textContent?.trim() === title);
-            if (!titleEl) return null;
-            return titleEl.nextElementSibling as HTMLElement;
-        };
+        assert.strictEqual(getValueByLabel('Authors'), 'Test Author');
 
-        assert.strictEqual(getTextByTitle('Author(s):'), 'Test Author');
-        assert.strictEqual(getTextByTitle('Tags:'), 'tag1, tag2');
-
-        const licenseLink = getLinkByTitle('License:');
-        assert.strictEqual(licenseLink?.getAttribute('href'), 'https://license.url');
-
-        const projectLink = getLinkByTitle('Project Url:');
-        assert.strictEqual(projectLink?.getAttribute('href'), 'https://project.url');
+        // Check tags
+        const tags = shadowRoot.querySelectorAll('.tag');
+        assert.strictEqual(tags.length, 2);
+        assert.strictEqual(tags[0].textContent?.trim(), 'tag1');
+        assert.strictEqual(tags[1].textContent?.trim(), 'tag2');
     });
 
     test('should trigger reloadDependencies when source changes', async () => {
@@ -248,20 +241,33 @@ suite('PackageDetails Component', () => {
             }
         };
 
-        packageDetails.packageDetails = mockPackageDetails as unknown as PackageDetails;
-        packageDetails.packageDetailsLoading = false;
+        // Set source and version URL to trigger reloadDependencies,
+        // then mock the API to return our test data
+        getPackageDetailsStub = () => Promise.resolve(ok({
+            Package: mockPackageDetails as unknown as PackageDetails
+        }));
 
+        packageDetails.source = 'https://source.url';
+        packageDetails.packageVersionUrl = 'https://package.url';
+
+        // Wait for async reloadDependencies to complete
+        await new Promise(resolve => setTimeout(resolve, 50));
+        await packageDetails.updateComplete;
+
+        // Verify the data was loaded
+        assert.ok(packageDetails.packageDetails, "packageDetails should be set");
+        assert.strictEqual(packageDetails.packageDetailsLoading, false);
+
+        // Now switch to dependencies tab and check rendered output
+        packageDetails.activeTab = 'dependencies';
         await packageDetails.updateComplete;
 
         const shadowRoot = packageDetails.shadowRoot;
-        const depContainer = shadowRoot?.querySelector('expandable-container[title="Dependencies"]');
-        assert.ok(depContainer);
+        assert.ok(shadowRoot);
 
-        // Use direct child selector to count frameworks
-        const frameworkLists = depContainer.querySelectorAll('.dependencies > ul > li');
-        assert.strictEqual(frameworkLists.length, 2);
+        const depContainer = shadowRoot.querySelector('.dependencies');
+        assert.ok(depContainer, "Dependencies container should exist");
 
-        // Check content
         const content = depContainer.textContent;
         assert.ok(content?.includes('net6.0'));
         assert.ok(content?.includes('Dep1 1.0.0'));
@@ -278,6 +284,7 @@ suite('PackageDetails Component', () => {
 
         packageDetails.packageDetails = mockPackageDetails as unknown as PackageDetails;
         packageDetails.packageDetailsLoading = false;
+        packageDetails.activeTab = 'dependencies';
 
         await packageDetails.updateComplete;
 

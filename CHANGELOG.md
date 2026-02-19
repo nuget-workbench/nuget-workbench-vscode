@@ -19,7 +19,7 @@
 - feat: Status bar loading indicator
 - refactor: Complete architecture overhaul (typed RPC replacing untyped messages)
 - refactor: Resizable 3-pane layout with Split.js
-- test: 313 tests (unit + component tests for all handlers and UI components)
+- test: 202 tests (unit + component tests for all handlers and UI components)
 - chore: GitHub Actions CI/CD pipeline with automatic Marketplace publish
 
 ### Credits

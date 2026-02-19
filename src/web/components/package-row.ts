@@ -8,11 +8,10 @@ const DEFAULT_ICON_URL = "https://nuget.org/Content/gallery/img/default-package-
 const styles = css`
   .package-row {
     margin: 2px;
-    padding: 3px;
+    padding: 4px 3px;
     display: flex;
-    gap: 4px;
-    align-items: center;
-    justify-content: space-between;
+    gap: 6px;
+    align-items: flex-start;
     cursor: default;
 
     &.package-row-selected {
@@ -35,24 +34,48 @@ const styles = css`
       outline-offset: -1px;
     }
 
-    .package-title {
-      display: flex;
-      gap: 4px;
-      align-items: center;
+    .icon {
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .package-content {
       flex: 1;
       overflow: hidden;
-      .title {
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
-      }
-      .icon {
-        width: 18px;
-        height: 18px;
-      }
-      .name {
-        font-weight: bold;
-      }
+      min-width: 0;
+    }
+
+    .package-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+    }
+
+    .name-line {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      overflow: hidden;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .name {
+      font-weight: bold;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .authors {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .package-version {
@@ -61,6 +84,7 @@ const styles = css`
       display: flex;
       align-items: center;
       gap: 3px;
+      flex-shrink: 0;
 
       .spinner {
         display: inline-block;
@@ -71,6 +95,34 @@ const styles = css`
         border-radius: 50%;
         animation: spin 1s linear infinite;
       }
+    }
+
+    .description {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      margin-top: 1px;
+    }
+
+    .meta-line {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      margin-top: 2px;
+    }
+
+    .downloads {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .verified-badge {
+      color: var(--vscode-charts-blue, #3794ff);
     }
   }
 
@@ -98,6 +150,12 @@ export class PackageRow extends LitElement {
 
   private onIconError(): void {
     this.iconUrl = DEFAULT_ICON_URL;
+  }
+
+  private formatDownloads(count: number): string {
+    if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
+    if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
+    return count.toString();
   }
 
   private renderVersionContent() {
@@ -145,21 +203,39 @@ export class PackageRow extends LitElement {
           }
         }}
       >
-        <div class="package-title">
-          <img
-            class="icon"
-            alt=""
-            src=${this.resolvedIconUrl}
-            @error=${() => this.onIconError()}
-          />
-          <div class="title">
-            <span class="name">${this.package.Name}</span>
-            ${this.package.Authors
-              ? html`<span class="authors">@${this.package.Authors}</span>`
-              : nothing}
+        <img
+          class="icon"
+          alt=""
+          src=${this.resolvedIconUrl}
+          @error=${() => this.onIconError()}
+        />
+        <div class="package-content">
+          <div class="package-header">
+            <div class="name-line">
+              <span class="name">${this.package.Name}</span>
+              ${this.package.Verified
+                ? html`<span class="codicon codicon-verified-filled verified-badge" title="Verified owner"></span>`
+                : nothing}
+              ${this.package.Authors
+                ? html`<span class="authors">by ${this.package.Authors}</span>`
+                : nothing}
+            </div>
+            <div class="package-version">${this.renderVersionContent()}</div>
           </div>
+          ${this.package.Description
+            ? html`<div class="description">${this.package.Description}</div>`
+            : nothing}
+          ${this.package.TotalDownloads > 0
+            ? html`
+                <div class="meta-line">
+                  <span class="downloads">
+                    <span class="codicon codicon-cloud-download"></span>
+                    ${this.formatDownloads(this.package.TotalDownloads)}
+                  </span>
+                </div>
+              `
+            : nothing}
         </div>
-        <div class="package-version">${this.renderVersionContent()}</div>
       </div>
     `;
   }
