@@ -285,6 +285,6 @@ export default class NuGetConfigResolver {
   }
 
   static ClearCache(): void {
-    this.configCache.clear();
+    CredentialsCache.clear();
   }
 }
