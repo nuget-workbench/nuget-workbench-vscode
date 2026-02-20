@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.2 (2026-02-20)
+
 - feat: Release script with version bump, changelog update, and dry-run mode (`scripts/release.mjs`)
 - feat: GitHub Actions `workflow_dispatch` trigger for remote releases
 - fix: Lit component tests failing with `cssText` error (JSDOM require hook for `.css.ts` modules)

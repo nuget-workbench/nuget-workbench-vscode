@@ -1,0 +1,6 @@
+- feat: Release script with version bump, changelog update, and dry-run mode (`scripts/release.mjs`)
+- feat: GitHub Actions `workflow_dispatch` trigger for remote releases
+- fix: Lit component tests failing with `cssText` error (JSDOM require hook for `.css.ts` modules)
+- fix: NuGetApiFactory tests using wrong logger stubs and message patterns
+- fix: SearchBar tests updated for `custom-dropdown` component refactoring
+- test: 313 tests passing (up from 197)
