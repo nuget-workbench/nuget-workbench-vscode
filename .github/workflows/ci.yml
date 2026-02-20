@@ -50,7 +50,7 @@ jobs:
           npm run test-compile
           xvfb-run -a npm test
 
-  release-dispatch:
+  release:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
     permissions:
@@ -88,12 +88,34 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Run release script
-        run: node scripts/release.mjs ${{ inputs.version }}
+        run: node tools/release.mjs ${{ inputs.version }}
+
+      - name: Read released version
+        id: version
+        run: echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to VS Code Marketplace
+        run: npx @vscode/vsce publish --no-dependencies
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Package .vsix
+        run: npx @vscode/vsce package --no-dependencies --out nuget-workbench.vsix
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          files: nuget-workbench.vsix
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: false
 
   publish:
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4

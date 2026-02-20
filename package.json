@@ -172,7 +172,7 @@
     "esbuild": "node ./esbuild.js",
     "test-compile": "tsc -p ./tsconfig.test.json",
     "package": "vsce package --no-dependencies --out releases/",
-    "release": "node scripts/release.mjs",
+    "release": "node tools/release.mjs",
     "screenshot": "node tools/take-screenshots.mjs"
   },
   "devDependencies": {
