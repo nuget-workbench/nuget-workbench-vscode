@@ -3,7 +3,7 @@
   "publisher": "nuget-workbench",
   "displayName": "NuGet Workbench",
   "description": "A comprehensive NuGet package management extension for Visual Studio Code with vulnerability scanning, multi-project support, and version consolidation.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "license": "MIT",
   "icon": "docs/images/icon.png",
   "galleryBanner": {
