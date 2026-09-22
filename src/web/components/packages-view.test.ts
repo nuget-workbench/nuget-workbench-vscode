@@ -294,6 +294,19 @@ suite('PackagesView Component', () => {
             assert.strictEqual(pkg.Status, 'Detailed');
         });
 
+        test('should keep a version the user picked while details were loading', async () => {
+            const pkg = new PackageViewModel(createMockPackage({ Version: '' }), 'MissingDetails');
+            let resolveGet!: (v: unknown) => void;
+            (mockHostApi.getPackage as sinon.SinonStub).returns(new Promise(r => { resolveGet = r; }));
+
+            const selecting = packagesView.SelectPackage(pkg);
+            packagesView.selectedVersion = '1.2.0';
+            resolveGet(ok({ Package: createMockPackage({ Version: '1.5.0' }), SourceUrl: '' }));
+            await selecting;
+
+            assert.strictEqual(packagesView.selectedVersion, '1.2.0');
+        });
+
         test('should set status to Error if package fetch fails', async () => {
             const pkg = new PackageViewModel(createMockPackage(), 'MissingDetails');
 

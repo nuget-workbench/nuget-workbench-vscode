@@ -139,8 +139,9 @@ export class ProjectRow extends LitElement {
       `;
     }
 
-    const canChange = !!version && !!target && version !== target && !pkg.IsPinned;
-    const isDowngrade = canChange && compareVersions(target, version!) < 0;
+    const cmp = version && target ? compareVersions(target, version) : 0;
+    const canChange = cmp !== 0 && !pkg.IsPinned;
+    const isDowngrade = canChange && cmp < 0;
 
     return html`
       ${errorIcon}

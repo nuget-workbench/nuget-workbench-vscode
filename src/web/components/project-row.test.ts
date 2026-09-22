@@ -197,4 +197,14 @@ suite('ProjectRow Component', () => {
         assert.ok(error, 'error indicator should be shown');
         assert.strictEqual(error?.getAttribute('title'), 'dotnet exited with code 1');
     });
+
+    test('should not offer an update for an equivalent version', async () => {
+        projectRow.packageId = 'TestPackage';
+        projectRow.packageVersion = '1.0';
+        await projectRow.updateComplete;
+
+        const shadowRoot = projectRow.shadowRoot;
+        assert.strictEqual(shadowRoot?.querySelector('.codicon-arrow-circle-up'), null);
+        assert.strictEqual(shadowRoot?.querySelector('.codicon-arrow-circle-down'), null);
+    });
 });

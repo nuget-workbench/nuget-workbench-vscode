@@ -750,6 +750,7 @@ export class PackagesView extends LitElement {
 
     if (this.selectedPackage.Status === "MissingDetails") {
       const packageToUpdate = this.selectedPackage;
+      const versionBeforeLoad = this.selectedVersion;
       const result = await hostApi.getPackage({
         Id: packageToUpdate.Id,
         Url: this.filters.SourceUrl,
@@ -776,7 +777,10 @@ export class PackagesView extends LitElement {
         this.requestUpdate();
         return;
       }
-      this.selectedVersion = packageToUpdate.Version;
+      // Only fill in the default if the user has not picked a version in the meantime
+      if (this.selectedVersion === versionBeforeLoad || !this.selectedVersion) {
+        this.selectedVersion = packageToUpdate.Version;
+      }
     }
 
     this.requestUpdate();

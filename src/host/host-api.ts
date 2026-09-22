@@ -542,7 +542,8 @@ export function createHostAPI(): HostAPI {
               packageMap.set(key, new Map());
               packageNames.set(key, pkg.Id);
             }
-            if (project.CpmEnabled) cpmPackages.add(key);
+            // A CPM project can still contain plain Version= references; only count centrally managed ones
+            if (pkg.VersionSource !== "project") cpmPackages.add(key);
             const versionMap = packageMap.get(key)!;
             if (!versionMap.has(pkg.Version)) {
               versionMap.set(pkg.Version, []);

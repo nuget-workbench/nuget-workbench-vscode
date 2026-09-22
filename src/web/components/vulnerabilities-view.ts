@@ -131,6 +131,14 @@ export class VulnerabilitiesView extends LitElement {
     }
   }
 
+  private emitCount(count: number | null): void {
+    this.dispatchEvent(new CustomEvent<number | null>("count-changed", {
+      detail: count,
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
   async LoadVulnerablePackages(): Promise<void> {
     const seq = ++this.loadSeq;
     this.isLoading = true;
@@ -148,20 +156,12 @@ export class VulnerabilitiesView extends LitElement {
       if (!result.ok) {
         this.hasError = true;
         this.errorText = result.error;
-        this.dispatchEvent(new CustomEvent<number | null>("count-changed", {
-          detail: null,
-          bubbles: true,
-          composed: true,
-        }));
+        this.emitCount(null);
       } else {
         this.packages = (result.value.Packages ?? []).map(
           (p) => new VulnerablePackageViewModel(p)
         );
-        this.dispatchEvent(new CustomEvent<number>("count-changed", {
-          detail: this.packages.length,
-          bubbles: true,
-          composed: true,
-        }));
+        this.emitCount(this.packages.length);
         this.statusText =
           this.packages.length > 0
             ? `${this.packages.length} vulnerabilit${this.packages.length !== 1 ? "ies" : "y"} found`
@@ -171,6 +171,7 @@ export class VulnerabilitiesView extends LitElement {
       if (seq !== this.loadSeq) return;
       this.hasError = true;
       this.errorText = e instanceof Error ? e.message : String(e);
+      this.emitCount(null);
     } finally {
       if (seq === this.loadSeq) {
         this.isLoading = false;
