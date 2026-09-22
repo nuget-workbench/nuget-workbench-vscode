@@ -37,6 +37,38 @@ export const sharedStyles = css`
     padding: 2px;
     display: flex;
     align-items: center;
+    border-radius: 3px;
+  }
+  button.icon-btn:hover:not(:disabled) {
+    background: var(--vscode-toolbar-hoverBackground);
+  }
+  button.icon-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
+  /* --- Focus ring (VS Code default styles do not reach into shadow DOM) --- */
+  button:focus-visible,
+  input:focus-visible,
+  [role="button"]:focus-visible,
+  [role="tab"]:focus-visible {
+    outline: 1px solid var(--vscode-focusBorder);
+    outline-offset: -1px;
+  }
+
+  /* --- Link-styled button --- */
+  button.link-btn {
+    background: transparent;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: var(--vscode-textLink-foreground);
+    cursor: pointer;
+    text-align: left;
+  }
+  button.link-btn:hover {
+    color: var(--vscode-textLink-activeForeground);
+    text-decoration: underline;
   }
 
   /* --- Primary button --- */
@@ -46,6 +78,10 @@ export const sharedStyles = css`
     border: none;
     padding: 4px 12px;
     cursor: pointer;
+  }
+
+  button.primary-btn:hover:not(:disabled) {
+    background: var(--vscode-button-hoverBackground);
   }
 
   button.primary-btn:disabled {
@@ -77,6 +113,7 @@ export const sharedStyles = css`
   /* --- Toolbar --- */
   .toolbar {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     padding: 4px;
@@ -112,10 +149,18 @@ export const sharedStyles = css`
   }
   .error {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
     justify-content: center;
+    align-items: center;
     margin-top: 32px;
     color: var(--vscode-errorForeground);
+  }
+  .row-error {
+    color: var(--vscode-errorForeground);
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
   }
 
   /* --- Package list container --- */

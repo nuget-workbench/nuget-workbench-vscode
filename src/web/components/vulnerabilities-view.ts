@@ -7,11 +7,13 @@ import { sharedStyles } from "@/web/styles/shared.css";
 import { hostApi } from "@/web/registrations";
 import { VulnerablePackageViewModel } from "../types";
 
+// Theme-aware foreground colors; badges use them as text + border on a transparent
+// background so contrast holds in light, dark and high-contrast themes.
 const severityColors: Record<number, string> = {
-  3: "var(--vscode-charts-red, #f14c4c)",
-  2: "var(--vscode-charts-orange, #cca700)",
-  1: "var(--vscode-charts-yellow, #cca700)",
-  0: "var(--vscode-descriptionForeground)",
+  3: "var(--vscode-editorError-foreground, #f14c4c)",
+  2: "var(--vscode-editorWarning-foreground, #cca700)",
+  1: "var(--vscode-editorWarning-foreground, #cca700)",
+  0: "var(--vscode-editorInfo-foreground, #3794ff)",
 };
 
 @customElement("vulnerabilities-view")
@@ -46,7 +48,8 @@ export class VulnerabilitiesView extends LitElement {
             .severity-badge {
               font-size: 10px;
               font-weight: bold;
-              padding: 1px 6px;
+              padding: 0 5px;
+              border: 1px solid currentColor;
               border-radius: 3px;
               text-transform: uppercase;
               white-space: nowrap;
@@ -56,14 +59,15 @@ export class VulnerabilitiesView extends LitElement {
               font-weight: bold;
               font-size: 13px;
               flex: 1;
+              min-width: 0;
               overflow: hidden;
               text-overflow: ellipsis;
               white-space: nowrap;
-              cursor: pointer;
+              color: var(--vscode-foreground);
             }
 
             .package-name:hover {
-              text-decoration: underline;
+              color: var(--vscode-textLink-activeForeground);
             }
 
             .advisory-link {
@@ -112,10 +116,12 @@ export class VulnerabilitiesView extends LitElement {
   @state() packages: VulnerablePackageViewModel[] = [];
   @state() isLoading: boolean = false;
   @state() hasError: boolean = false;
+  @state() errorText: string = "";
   @state() statusText: string = "";
   @property({ attribute: false }) projectPaths: string[] = [];
 
   private loaded = false;
+  private loadSeq = 0;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -125,37 +131,51 @@ export class VulnerabilitiesView extends LitElement {
     }
   }
 
+  private emitCount(count: number | null): void {
+    this.dispatchEvent(new CustomEvent<number | null>("count-changed", {
+      detail: count,
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
   async LoadVulnerablePackages(): Promise<void> {
+    const seq = ++this.loadSeq;
     this.isLoading = true;
     this.hasError = false;
+    this.errorText = "";
+    this.statusText = "";
     this.packages = [];
 
     try {
       const result = await hostApi.getVulnerablePackages({
         ProjectPaths: this.projectPaths.length > 0 ? this.projectPaths : undefined,
       });
+      if (seq !== this.loadSeq) return;
 
       if (!result.ok) {
         this.hasError = true;
-        this.statusText = "Failed to scan for vulnerabilities";
+        this.errorText = result.error;
+        this.emitCount(null);
       } else {
         this.packages = (result.value.Packages ?? []).map(
           (p) => new VulnerablePackageViewModel(p)
         );
-        this.dispatchEvent(new CustomEvent<number>("count-changed", {
-          detail: this.packages.length,
-          bubbles: true,
-          composed: true,
-        }));
+        this.emitCount(this.packages.length);
         this.statusText =
           this.packages.length > 0
             ? `${this.packages.length} vulnerabilit${this.packages.length !== 1 ? "ies" : "y"} found`
             : "";
       }
-    } catch {
+    } catch (e) {
+      if (seq !== this.loadSeq) return;
       this.hasError = true;
+      this.errorText = e instanceof Error ? e.message : String(e);
+      this.emitCount(null);
     } finally {
-      this.isLoading = false;
+      if (seq === this.loadSeq) {
+        this.isLoading = false;
+      }
     }
   }
 
@@ -178,22 +198,20 @@ export class VulnerabilitiesView extends LitElement {
   private renderPackageRow(pkg: VulnerablePackageViewModel): unknown {
     const color = this.getSeverityColor(pkg.Severity);
     return html`
-      <div class="vuln-row">
+      <div class="vuln-row" role="listitem">
         <div class="row-header">
           <span
             class="severity-badge"
             role="img"
             aria-label="${pkg.SeverityLabel} severity"
-            style="background-color: ${color}; color: var(--vscode-editor-background);"
+            style="color: ${color};"
           >
             ${pkg.SeverityLabel}
           </span>
-          <span class="package-name" @click=${() => this.selectPackage(pkg.Id)}>${pkg.Id}</span>
+          <button class="link-btn package-name" title="Show ${pkg.Id} details" @click=${() => this.selectPackage(pkg.Id)}>${pkg.Id}</button>
           <a
             class="advisory-link"
             href=${pkg.AdvisoryUrl}
-            role="link"
-            tabindex="0"
             aria-label="View advisory for ${pkg.Id}"
             @click=${(e: Event) => { e.preventDefault(); this.openAdvisory(pkg.AdvisoryUrl); }}
           >
@@ -221,7 +239,13 @@ export class VulnerabilitiesView extends LitElement {
     return html`
       <div class="vuln-container" aria-busy=${this.isLoading}>
         <div class="toolbar">
-          <button class="icon-btn" aria-label="Refresh vulnerabilities" title="Refresh" @click=${() => this.LoadVulnerablePackages()}>
+          <button
+            class="icon-btn"
+            aria-label="Refresh vulnerabilities"
+            title="Refresh"
+            ?disabled=${this.isLoading}
+            @click=${() => this.LoadVulnerablePackages()}
+          >
             <span class="codicon codicon-refresh"></span>
           </button>
           <span class="status-text" role="status" aria-live="polite">${this.statusText}</span>
@@ -247,7 +271,8 @@ export class VulnerabilitiesView extends LitElement {
           ? html`
               <div class="error" role="alert">
                 <span class="codicon codicon-error"></span>
-                Failed to scan for vulnerabilities
+                <span>Failed to scan for vulnerabilities${this.errorText ? `: ${this.errorText}` : ""}</span>
+                <button class="link-btn" @click=${() => this.LoadVulnerablePackages()}>Retry</button>
               </div>
             `
           : nothing}

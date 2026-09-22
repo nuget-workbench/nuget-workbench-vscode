@@ -115,6 +115,7 @@ export class OutdatedPackageViewModel {
   SourceName: string;
   IsUpdating: boolean = false;
   Selected: boolean = false;
+  Error: string | null = null;
 
   constructor(model: OutdatedPackage) {
     this.Id = model.Id;
@@ -133,6 +134,7 @@ export class InconsistentPackageViewModel {
   CpmManaged: boolean;
   TargetVersion: string;
   IsConsolidating: boolean = false;
+  Error: string | null = null;
 
   constructor(model: InconsistentPackage) {
     this.Id = model.Id;

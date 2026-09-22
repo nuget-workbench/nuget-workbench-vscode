@@ -112,6 +112,10 @@ export class PackageDetailsComponent extends LitElement {
         }
       }
 
+      .no-dependencies.error-text {
+        color: var(--vscode-errorForeground);
+      }
+
       .no-dependencies {
         margin-top: 8px;
         display: flex;
@@ -182,7 +186,9 @@ export class PackageDetailsComponent extends LitElement {
   @property() selectedVersion: string = "";
 
   @state() packageDetailsLoading: boolean = false;
+  @state() packageDetailsError: string = "";
   @state() packageDetails?: PackageDetails;
+  private detailsSeq = 0;
   @state() activeTab: DetailTab = "description";
 
   protected updated(changedProps: PropertyValues): void {
@@ -192,7 +198,11 @@ export class PackageDetailsComponent extends LitElement {
   }
 
   private async reloadDependencies(): Promise<void> {
+    // Every call supersedes the previous one, including calls that return early
+    const seq = ++this.detailsSeq;
     this.packageDetails = undefined;
+    this.packageDetailsError = "";
+    this.packageDetailsLoading = false;
 
     if (!this.source) return;
     if (!this.packageVersionUrl) return;
@@ -206,10 +216,12 @@ export class PackageDetailsComponent extends LitElement {
 
     const result = await hostApi.getPackageDetails(request);
 
-    if (request.PackageVersionUrl !== this.packageVersionUrl) return;
+    if (seq !== this.detailsSeq) return;
 
     if (result.ok) {
       this.packageDetails = result.value.Package;
+    } else {
+      this.packageDetailsError = result.error;
     }
     this.packageDetailsLoading = false;
   }
@@ -272,7 +284,16 @@ export class PackageDetailsComponent extends LitElement {
 
   private renderDependenciesTab(): unknown {
     if (this.packageDetailsLoading) {
-      return html`<span class="spinner large loader"></span>`;
+      return html`<span class="spinner large loader" role="status" aria-label="Loading dependencies"></span>`;
+    }
+
+    if (this.packageDetailsError) {
+      return html`
+        <div class="no-dependencies error-text" role="alert">
+          <span class="codicon codicon-error"></span>
+          <span>Failed to load dependencies: ${this.packageDetailsError}</span>
+        </div>
+      `;
     }
 
     const frameworks = this.packageDetails?.dependencies?.frameworks ?? {};

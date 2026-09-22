@@ -1,5 +1,6 @@
 import { LitElement, css, html, nothing } from "lit";
 import { customElement, state } from "lit/decorators.js";
+import { repeat } from "lit/directives/repeat.js";
 
 import Split from "split.js";
 import hash from "object-hash";
@@ -84,6 +85,7 @@ export class PackagesView extends LitElement {
 
           .tab-bar {
             display: flex;
+            flex-wrap: wrap;
             align-items: center;
             gap: 2px;
             padding: 4px 4px 0;
@@ -144,8 +146,13 @@ export class PackagesView extends LitElement {
             margin-top: 6px;
           }
 
-          .tab-content.hidden {
+          .tab-content.hidden,
+          .tab-content > .hidden {
             display: none;
+          }
+
+          .tab-content > .empty {
+            flex: 1;
           }
 
           .installed-packages {
@@ -282,7 +289,7 @@ export class PackagesView extends LitElement {
 
   private splitter: Split.Instance | null = null;
   packagesPage: number = 0;
-  packagesLoadingInProgress: boolean = false;
+  @state() packagesLoadingInProgress: boolean = false;
   private currentLoadPackageHash: string = "";
 
   @state() activeTab: TabId = "browse";
@@ -324,6 +331,8 @@ export class PackagesView extends LitElement {
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.splitter?.destroy();
+    this.debouncedLoadProjectsPackages.cancel();
+    this.debouncedReloadChildViews.cancel();
   }
 
   private initSplitter(): void {
@@ -362,12 +371,12 @@ export class PackagesView extends LitElement {
 
   private toggleProjectTree(): void {
     this.showProjectTree = !this.showProjectTree;
-    this.updatesCount = null;
-    this.consolidateCount = null;
-    this.vulnerabilitiesCount = null;
+    this.resetChildCounts();
     this.updateComplete.then(() => {
       this.initSplitter();
       this.reloadChildViews();
+      // The installed list depends on whether the project filter is active
+      this.LoadProjectsPackages();
     });
   }
 
@@ -407,14 +416,34 @@ export class PackagesView extends LitElement {
     return this.showProjectTree ? this.selectedProjectPaths : [];
   }
 
+  /** True when the project tree is visible and the user unchecked every project. */
+  private get noProjectsSelected(): boolean {
+    return this.showProjectTree && this.projects.length > 0 && this.selectedProjectPaths.length === 0;
+  }
+
   private get filteredProjects(): Array<ProjectViewModel> {
-    if (!this.showProjectTree || this.selectedProjectPaths.length === 0) return this.projects;
+    if (!this.showProjectTree) return this.projects;
     return this.projects.filter((p) =>
       this.selectedProjectPaths.includes(p.Path)
     );
   }
 
+  /** Browse results sorted client-side (the NuGet search API has no sort parameter). */
+  private get sortedPackages(): Array<PackageViewModel> {
+    switch (this.filters.Sort) {
+      case "downloads":
+        return [...this.packages].sort((a, b) => b.TotalDownloads - a.TotalDownloads);
+      case "name-asc":
+        return [...this.packages].sort((a, b) =>
+          a.Name.localeCompare(b.Name, undefined, { sensitivity: "base" })
+        );
+      default:
+        return this.packages;
+    }
+  }
+
   private handleTabKeydown(e: KeyboardEvent): void {
+    if ((e.target as HTMLElement | null)?.getAttribute("role") !== "tab") return;
     const tabs: TabId[] = ["browse", "installed", "updates", "consolidate", "vulnerabilities"];
     const currentIdx = tabs.indexOf(this.activeTab);
     let newIdx = currentIdx;
@@ -449,14 +478,15 @@ export class PackagesView extends LitElement {
     const { packageId, sourceUrl } = e.detail;
 
     // Check if we already have this package in projectsPackages (installed)
-    const existing = this.projectsPackages.find((p) => p.Id === packageId);
+    const lowerId = packageId.toLowerCase();
+    const existing = this.projectsPackages.find((p) => p.Id.toLowerCase() === lowerId);
     if (existing) {
       await this.SelectPackage(existing);
       return;
     }
 
     // Check if we have it in browse packages
-    const browsePkg = this.packages.find((p) => p.Id === packageId);
+    const browsePkg = this.packages.find((p) => p.Id.toLowerCase() === lowerId);
     if (browsePkg) {
       await this.SelectPackage(browsePkg);
       return;
@@ -496,15 +526,25 @@ export class PackagesView extends LitElement {
 
   private OnProjectSelectionChanged(paths: string[]): void {
     this.selectedProjectPaths = paths;
-    this.updatesCount = null;
-    this.consolidateCount = null;
-    this.vulnerabilitiesCount = null;
-    this.reloadChildViews();
+    this.resetChildCounts();
+    this.debouncedReloadChildViews();
     this.debouncedLoadProjectsPackages();
   }
 
+  private resetChildCounts(): void {
+    this.updatesCount = null;
+    this.consolidateCount = null;
+    this.vulnerabilitiesCount = null;
+  }
+
+  // Coalesce bursts (e.g. clicking several project checkboxes) into one reload
+  private debouncedReloadChildViews = lodash.debounce(() => this.reloadChildViews(), 300);
+
   private reloadChildViews(): void {
+    this.debouncedReloadChildViews.cancel();
     this.updateComplete.then(() => {
+      // Nothing to scan when every project is unchecked; the tabs show an empty state instead
+      if (this.noProjectsSelected) return;
       const updates = this.shadowRoot?.querySelector("updates-view") as UpdatesView | null;
       const consolidate = this.shadowRoot?.querySelector("consolidate-view") as ConsolidateView | null;
       const vulnerabilities = this.shadowRoot?.querySelector("vulnerabilities-view") as VulnerabilitiesView | null;
@@ -518,13 +558,11 @@ export class PackagesView extends LitElement {
     this.LoadProjectsPackages();
   }, 300);
 
+  private loadProjectsPackagesSeq = 0;
+
   async LoadProjectsPackages(forceReload: boolean = false): Promise<void> {
-    const projectsToUse =
-      this.selectedProjectPaths.length > 0
-        ? this.projects.filter((p) =>
-            this.selectedProjectPaths.includes(p.Path)
-          )
-        : this.projects;
+    const seq = ++this.loadProjectsPackagesSeq;
+    const projectsToUse = this.filteredProjects;
 
     const packages = projectsToUse
       ?.flatMap((p) => p.Packages)
@@ -601,6 +639,8 @@ export class PackagesView extends LitElement {
     try {
       const promises = this.projectsPackages.map(async (pkg) => {
         await this.UpdatePackage(pkg, forceReload);
+        // A newer load replaced the list; do not touch the status bar or re-render for it
+        if (seq !== this.loadProjectsPackagesSeq) return;
         completed++;
         this.projectsPackages = [...this.projectsPackages];
         hostApi.updateStatusBar({
@@ -610,9 +650,11 @@ export class PackagesView extends LitElement {
       });
       await Promise.allSettled(promises);
     } finally {
-      this.projectsPackages = [...this.projectsPackages];
-      if (total > 0) {
-        hostApi.updateStatusBar({ Percentage: null });
+      if (seq === this.loadProjectsPackagesSeq) {
+        this.projectsPackages = [...this.projectsPackages];
+        if (total > 0) {
+          hostApi.updateStatusBar({ Percentage: null });
+        }
       }
     }
   }
@@ -624,6 +666,24 @@ export class PackagesView extends LitElement {
     } else {
       await this.LoadProjectsPackages();
     }
+    // Installed versions changed: the Updates/Consolidate/Vulnerabilities tabs are stale now
+    this.resetChildCounts();
+    this.reloadChildViews();
+  }
+
+  /** Called when the Updates or Consolidate tab changed project files. */
+  private async OnChildViewChangedProjects(source: Element): Promise<void> {
+    await this.LoadProjects(true);
+    this.updateComplete.then(() => {
+      if (this.noProjectsSelected) return;
+      const updates = this.shadowRoot?.querySelector("updates-view") as UpdatesView | null;
+      const consolidate = this.shadowRoot?.querySelector("consolidate-view") as ConsolidateView | null;
+      const vulnerabilities = this.shadowRoot?.querySelector("vulnerabilities-view") as VulnerabilitiesView | null;
+      // The originating view already updated its own list
+      if (updates && updates !== source) updates.LoadOutdatedPackages();
+      if (consolidate && consolidate !== source) consolidate.LoadInconsistentPackages();
+      vulnerabilities?.LoadVulnerablePackages();
+    });
   }
 
   private async UpdatePackage(
@@ -652,16 +712,25 @@ export class PackagesView extends LitElement {
   }
 
   async UpdatePackagesFilters(filters: FilterEvent): Promise<void> {
-    const forceReload = this.filters.Prerelease !== filters.Prerelease;
+    const prereleaseChanged = this.filters.Prerelease !== filters.Prerelease;
     const sourceChanged = this.filters.SourceUrl !== filters.SourceUrl;
+    const queryChanged = this.filters.Query !== filters.Query;
+    const onlySortChanged =
+      !prereleaseChanged && !sourceChanged && !queryChanged && this.filters.Sort !== filters.Sort;
     this.filters = filters;
-    await this.LoadPackages(false, forceReload || sourceChanged);
-    await this.LoadProjectsPackages(forceReload || sourceChanged);
 
-    if (sourceChanged) {
-      this.updatesCount = null;
-      this.consolidateCount = null;
-      this.vulnerabilitiesCount = null;
+    // Sorting is applied client-side, no need to hit the feed again
+    if (onlySortChanged) return;
+
+    const forceReload = prereleaseChanged || sourceChanged;
+    await Promise.all([
+      this.LoadPackages(false, forceReload),
+      this.LoadProjectsPackages(forceReload),
+    ]);
+
+    // The Updates tab depends on the prerelease flag and the source
+    if (prereleaseChanged || sourceChanged) {
+      this.resetChildCounts();
       this.reloadChildViews();
     }
   }
@@ -677,9 +746,11 @@ export class PackagesView extends LitElement {
       .forEach((x) => (x.Selected = false));
     selectedPackage.Selected = true;
     this.selectedPackage = selectedPackage;
+    this.selectedVersion = selectedPackage.Version;
 
     if (this.selectedPackage.Status === "MissingDetails") {
       const packageToUpdate = this.selectedPackage;
+      const versionBeforeLoad = this.selectedVersion;
       const result = await hostApi.getPackage({
         Id: packageToUpdate.Id,
         Url: this.filters.SourceUrl,
@@ -700,9 +771,18 @@ export class PackagesView extends LitElement {
         );
         packageToUpdate.Status = "Detailed";
       }
+
+      // The user selected another package (or picked a version) while this was loading
+      if (this.selectedPackage !== packageToUpdate) {
+        this.requestUpdate();
+        return;
+      }
+      // Only fill in the default if the user has not picked a version in the meantime
+      if (this.selectedVersion === versionBeforeLoad || !this.selectedVersion) {
+        this.selectedVersion = packageToUpdate.Version;
+      }
     }
 
-    this.selectedVersion = this.selectedPackage.Version;
     this.requestUpdate();
   }
 
@@ -719,11 +799,11 @@ export class PackagesView extends LitElement {
   async ReloadInvoked(
     forceReload: boolean = false
   ): Promise<void> {
-    await this.LoadPackages(false, forceReload);
-    await this.LoadProjects(forceReload);
-    this.updatesCount = null;
-    this.consolidateCount = null;
-    this.vulnerabilitiesCount = null;
+    await Promise.all([
+      this.LoadPackages(false, forceReload),
+      this.LoadProjects(forceReload),
+    ]);
+    this.resetChildCounts();
     this.reloadChildViews();
   }
 
@@ -747,7 +827,10 @@ export class PackagesView extends LitElement {
 
     if (!append) {
       this.packagesPage = 0;
-      this.selectedPackage = null;
+      // Only drop the details pane when it shows a browse result that is about to disappear
+      if (this.selectedPackage && this.packages.includes(this.selectedPackage)) {
+        this.selectedPackage = null;
+      }
       this.packages = [];
     }
     this.noMorePackages = false;
@@ -766,6 +849,8 @@ export class PackagesView extends LitElement {
       this.packagesLoadingError = true;
       this.packagesLoadingErrorMessage = result.error;
       this.packagesLoadingInProgress = false;
+      // Stop infinite scroll from re-triggering the failing request; the Retry button resumes it
+      this.noMorePackages = true;
     } else {
       const packagesViewModels = result.value.Packages.map(
         (x) => new PackageViewModel(x)
@@ -779,17 +864,38 @@ export class PackagesView extends LitElement {
     }
   }
 
-  async LoadProjects(forceReload: boolean = false): Promise<void> {
-    this.projects = [];
-    const result = await hostApi.getProjects({ ForceReload: forceReload });
+  @state() projectsLoading: boolean = false;
+  @state() projectsLoadingError: string = "";
 
-    if (result.ok) {
-      this.projects = result.value.Projects.map(
-        (x) => new ProjectViewModel(x)
-      );
-      this.selectedProjectPaths = this.projects.map((p) => p.Path);
-      await this.LoadProjectsPackages(forceReload);
+  async LoadProjects(forceReload: boolean = false): Promise<void> {
+    this.projectsLoading = true;
+    this.projectsLoadingError = "";
+    const result = await hostApi.getProjects({ ForceReload: forceReload });
+    this.projectsLoading = false;
+
+    if (!result.ok) {
+      this.projectsLoadingError = result.error;
+      return;
     }
+
+    const previousPaths = this.projects.map((p) => p.Path);
+    const hadAllSelected =
+      previousPaths.length === 0 ||
+      previousPaths.every((p) => this.selectedProjectPaths.includes(p));
+
+    this.projects = result.value.Projects.map(
+      (x) => new ProjectViewModel(x)
+    );
+    const newPaths = this.projects.map((p) => p.Path);
+    // Keep the user's project selection across reloads
+    this.selectedProjectPaths = hadAllSelected
+      ? newPaths
+      : newPaths.filter((p) => this.selectedProjectPaths.includes(p));
+    await this.LoadProjectsPackages(forceReload);
+  }
+
+  private retryLoadPackages(): void {
+    this.LoadPackages(this.packages.length > 0);
   }
 
   // -- Render helpers --
@@ -801,24 +907,37 @@ export class PackagesView extends LitElement {
         @scroll=${async (e: Event) =>
           await this.PackagesScrollEvent(e.target as HTMLElement)}
       >
+        <div role="listbox" aria-label="Search results">
+          ${repeat(
+            this.sortedPackages,
+            (pkg) => pkg.Id,
+            (pkg) => html`
+              <package-row
+                .package=${pkg}
+                .selected=${pkg === this.selectedPackage}
+                @click=${() => this.SelectPackage(pkg)}
+              ></package-row>
+            `
+          )}
+        </div>
         ${this.packagesLoadingError
-          ? html`<div class="error">
+          ? html`<div class="error" role="alert">
               <span class="codicon codicon-error"></span>
-              ${this.packagesLoadingErrorMessage || "Failed to fetch packages"}
+              <span>${this.packagesLoadingErrorMessage || "Failed to fetch packages"}</span>
+              <button class="link-btn" @click=${() => this.retryLoadPackages()}>Retry</button>
             </div>`
-          : html`
-              ${this.packages.map(
-                (pkg) => html`
-                  <package-row
-                    .package=${pkg}
-                    @click=${() => this.SelectPackage(pkg)}
-                  ></package-row>
-                `
-              )}
-              ${!this.noMorePackages
-                ? html`<span class="spinner medium loader"></span>`
-                : nothing}
-            `}
+          : nothing}
+        ${this.packagesLoadingInProgress || (!this.noMorePackages && !this.packagesLoadingError)
+          ? html`<span class="spinner medium loader" role="status" aria-label="Loading packages"></span>`
+          : nothing}
+        ${!this.packagesLoadingInProgress && !this.packagesLoadingError && this.packages.length === 0 && this.noMorePackages
+          ? html`<div class="empty">
+              <span class="codicon codicon-search"></span>
+              ${this.filters.Query
+                ? `No packages found for "${this.filters.Query}"`
+                : "No packages found"}
+            </div>`
+          : nothing}
       </div>
     `;
   }
@@ -826,20 +945,43 @@ export class PackagesView extends LitElement {
   private renderInstalledTab(): unknown {
     return html`
       <div class="packages-container installed-packages">
-        ${this.projectsPackages.map(
-          (pkg) => html`
-            <package-row
-              .showInstalledVersion=${true}
-              .package=${pkg}
-              .revision=${pkg.Revision}
-              @click=${() => this.SelectPackage(pkg)}
-            ></package-row>
-          `
-        )}
+        ${this.noProjectsSelected
+          ? this.renderNoProjectsSelected()
+          : this.projectsPackages.length === 0 && !this.projectsLoading
+            ? html`<div class="empty">
+                <span class="codicon codicon-package"></span>
+                ${this.projectsLoadingError
+                  ? this.projectsLoadingError
+                  : this.filters.Query
+                    ? `No installed packages match "${this.filters.Query}"`
+                    : "No packages installed in the selected projects"}
+              </div>`
+            : html`<div role="listbox" aria-label="Installed packages">
+                ${repeat(
+                  this.projectsPackages,
+                  (pkg) => pkg.Id,
+                  (pkg) => html`
+                    <package-row
+                      .showInstalledVersion=${true}
+                      .package=${pkg}
+                      .revision=${pkg.Revision}
+                      .selected=${pkg === this.selectedPackage}
+                      @click=${() => this.SelectPackage(pkg)}
+                    ></package-row>
+                  `
+                )}
+              </div>`}
       </div>
     `;
   }
 
+
+  private renderNoProjectsSelected(): unknown {
+    return html`<div class="empty">
+      <span class="codicon codicon-info"></span>
+      No projects selected. Check at least one project in the project tree.
+    </div>`;
+  }
 
   private renderPackageTitle(): unknown {
     const nugetUrl = this.NugetOrgPackageUrl;
@@ -902,13 +1044,19 @@ export class PackagesView extends LitElement {
             ariaLabel="Package version"
             @change=${(e: CustomEvent<string>) => { this.selectedVersion = e.detail; }}
           ></custom-dropdown>
-          <button class="icon-btn" @click=${() => this.LoadProjects()}>
+          <button
+            class="icon-btn"
+            aria-label="Reload projects"
+            title="Reload projects"
+            ?disabled=${this.projectsLoading}
+            @click=${() => this.LoadProjects(true)}
+          >
             <span class="codicon codicon-refresh"></span>
           </button>
         </div>
       </div>
       <div class="projects-panel-container">
-        ${this.projects.length > 0
+        ${this.filteredProjects.length > 0
           ? this.filteredProjects.map(
               (project) => html`
                 <project-row
@@ -922,7 +1070,14 @@ export class PackagesView extends LitElement {
               `
             )
           : html`<div class="no-projects">
-              <span class="codicon codicon-info"></span> No projects found
+              <span class="codicon codicon-info"></span>
+              ${this.projectsLoading
+                ? "Loading projects..."
+                : this.projectsLoadingError
+                  ? `Failed to load projects: ${this.projectsLoadingError}`
+                  : this.noProjectsSelected
+                    ? "No projects selected"
+                    : "No projects found"}
             </div>`}
         <div class="separator"></div>
         <package-details
@@ -964,6 +1119,7 @@ export class PackagesView extends LitElement {
           ? html`<div class="col" id="project-tree">
               <project-tree
                 .projects=${this.projects}
+                .selectedPaths=${this.selectedProjectPaths}
                 @selection-changed=${(e: CustomEvent<string[]>) =>
                   this.OnProjectSelectionChanged(e.detail)}
               ></project-tree>
@@ -1046,25 +1202,33 @@ export class PackagesView extends LitElement {
             ${this.renderInstalledTab()}
           </div>
           <div class="tab-content ${this.activeTab === "updates" ? "" : "hidden"}" role="tabpanel" aria-label="updates tab">
+            ${this.noProjectsSelected ? this.renderNoProjectsSelected() : nothing}
             <updates-view
+              class=${this.noProjectsSelected ? "hidden" : ""}
               .prerelease=${this.filters.Prerelease}
               .projectPaths=${this.effectiveProjectPaths}
               .sourceUrl=${this.filters.SourceUrl}
-              @count-changed=${(e: CustomEvent<number>) => { this.updatesCount = e.detail; }}
+              @count-changed=${(e: CustomEvent<number | null>) => { this.updatesCount = e.detail; }}
               @package-selected=${(e: CustomEvent) => this.onChildPackageSelected(e)}
+              @projects-changed=${(e: Event) => this.OnChildViewChangedProjects(e.currentTarget as Element)}
             ></updates-view>
           </div>
           <div class="tab-content ${this.activeTab === "consolidate" ? "" : "hidden"}" role="tabpanel" aria-label="consolidate tab">
+            ${this.noProjectsSelected ? this.renderNoProjectsSelected() : nothing}
             <consolidate-view
+              class=${this.noProjectsSelected ? "hidden" : ""}
               .projectPaths=${this.effectiveProjectPaths}
-              @count-changed=${(e: CustomEvent<number>) => { this.consolidateCount = e.detail; }}
+              @count-changed=${(e: CustomEvent<number | null>) => { this.consolidateCount = e.detail; }}
               @package-selected=${(e: CustomEvent) => this.onChildPackageSelected(e)}
+              @projects-changed=${(e: Event) => this.OnChildViewChangedProjects(e.currentTarget as Element)}
             ></consolidate-view>
           </div>
           <div class="tab-content ${this.activeTab === "vulnerabilities" ? "" : "hidden"}" role="tabpanel" aria-label="vulnerabilities tab">
+            ${this.noProjectsSelected ? this.renderNoProjectsSelected() : nothing}
             <vulnerabilities-view
+              class=${this.noProjectsSelected ? "hidden" : ""}
               .projectPaths=${this.effectiveProjectPaths}
-              @count-changed=${(e: CustomEvent<number>) => { this.vulnerabilitiesCount = e.detail; }}
+              @count-changed=${(e: CustomEvent<number | null>) => { this.vulnerabilitiesCount = e.detail; }}
               @package-selected=${(e: CustomEvent) => this.onChildPackageSelected(e)}
             ></vulnerabilities-view>
           </div>

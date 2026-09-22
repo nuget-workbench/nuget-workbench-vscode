@@ -37,6 +37,7 @@ import TaskExecutor from "./utilities/task-executor";
 import StatusBarUtils from "./utilities/status-bar-utils";
 import { Logger } from "../common/logger";
 import { AxiosError } from "axios";
+import { compareVersions, isNonConcreteVersion, isVersionInRange } from "../common/version";
 
 function extractResponseDetail(data: unknown): string {
   if (!data) return "";
@@ -283,12 +284,7 @@ export function createHostAPI(): HostAPI {
 
     async getConfiguration(): Promise<Result<GetConfigurationResponse>> {
       Logger.info("getConfiguration: Retrieving configuration");
-      let config = vscode.workspace.getConfiguration("NugetWorkbench");
-      try {
-        await config.update("sources", undefined, vscode.ConfigurationTarget.Workspace);
-        await config.update("skipRestore", undefined, vscode.ConfigurationTarget.Workspace);
-      } catch { /* workspace config cleanup */ }
-      config = vscode.workspace.getConfiguration("NugetWorkbench");
+      const config = vscode.workspace.getConfiguration("NugetWorkbench");
 
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       const sourcesWithCreds = await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot);
@@ -342,6 +338,7 @@ export function createHostAPI(): HostAPI {
       await config.update("skipRestore", request.Configuration.SkipRestore, vscode.ConfigurationTarget.Global);
       await config.update("enablePackageVersionInlineInfo", request.Configuration.EnablePackageVersionInlineInfo, vscode.ConfigurationTarget.Global);
       await config.update("prerelease", request.Configuration.Prerelease, vscode.ConfigurationTarget.Global);
+      await config.update("statusBarLoadingIndicator", request.Configuration.StatusBarLoadingIndicator, vscode.ConfigurationTarget.Global);
       await config.update("sources", sources, vscode.ConfigurationTarget.Global);
       Logger.info("updateConfiguration: Configuration updated successfully");
       return ok(undefined as void);
@@ -399,25 +396,24 @@ export function createHostAPI(): HostAPI {
           }
         }
 
+        // Keyed by lowercase package id; each project keeps its own installed version
         const installedMap = new Map<
           string,
-          { version: string; projects: Array<{ Name: string; Path: string; Version: string }> }
+          { id: string; projects: Array<{ Name: string; Path: string; Version: string }> }
         >();
 
         for (const project of projects) {
           for (const pkg of project.Packages) {
-            if (!pkg.Version || pkg.IsPinned) continue;
+            if (!pkg.Version || pkg.IsPinned || isNonConcreteVersion(pkg.Version)) continue;
 
-            const existing = installedMap.get(pkg.Id);
+            const key = pkg.Id.toLowerCase();
             const projectInfo = { Name: project.Name, Path: project.Path, Version: pkg.Version };
+            const existing = installedMap.get(key);
 
             if (existing) {
               existing.projects.push(projectInfo);
-              if (compareVersions(pkg.Version, existing.version) > 0) {
-                existing.version = pkg.Version;
-              }
             } else {
-              installedMap.set(pkg.Id, { version: pkg.Version, projects: [projectInfo] });
+              installedMap.set(key, { id: pkg.Id, projects: [projectInfo] });
             }
           }
         }
@@ -433,20 +429,29 @@ export function createHostAPI(): HostAPI {
           const progress = Math.round(((i + batch.length) / packageIds.length) * 100);
           StatusBarUtils.show(progress, `Checking updates (${i + batch.length}/${packageIds.length})...`);
 
-          const promises = batch.map(async (packageId) => {
-            const installed = installedMap.get(packageId)!;
-            const latest = await getLatestVersion(packageId, request.Prerelease, sources);
+          const promises = batch.map(async (key) => {
+            const installed = installedMap.get(key)!;
+            const latest = await getLatestVersion(installed.id, request.Prerelease, sources);
+            if (!latest) return;
 
-            if (latest && compareVersions(latest.version, installed.version) > 0) {
-              outdated.push({
-                Id: packageId,
-                InstalledVersion: installed.version,
-                LatestVersion: latest.version,
-                Projects: installed.projects,
-                SourceUrl: latest.sourceUrl,
-                SourceName: latest.sourceName,
-              });
-            }
+            // Only projects that are actually behind the latest version are outdated
+            const outdatedProjects = installed.projects.filter(
+              (p) => compareVersions(latest.version, p.Version) > 0
+            );
+            if (outdatedProjects.length === 0) return;
+
+            const lowestVersion = outdatedProjects
+              .map((p) => p.Version)
+              .reduce((min, v) => (compareVersions(v, min) < 0 ? v : min));
+
+            outdated.push({
+              Id: installed.id,
+              InstalledVersion: lowestVersion,
+              LatestVersion: latest.version,
+              Projects: outdatedProjects,
+              SourceUrl: latest.sourceUrl,
+              SourceName: latest.sourceName,
+            });
           });
 
           await Promise.allSettled(promises);
@@ -512,14 +517,12 @@ export function createHostAPI(): HostAPI {
         }
 
         const projects: Project[] = [];
-        let anyCpmEnabled = false;
 
         for (const file of projectFiles) {
           try {
             const cpmVersions = await CpmResolver.GetPackageVersions(file.fsPath);
             const project = await ProjectParser.Parse(file.fsPath, cpmVersions);
             project.CpmEnabled = cpmVersions !== null;
-            if (project.CpmEnabled) anyCpmEnabled = true;
             projects.push(project);
           } catch (e) {
             Logger.error(`getInconsistentPackages: Failed to parse ${file.fsPath}`, e);
@@ -527,15 +530,21 @@ export function createHostAPI(): HostAPI {
         }
 
         const packageMap = new Map<string, Map<string, Array<{ Name: string; Path: string }>>>();
+        const packageNames = new Map<string, string>();
+        const cpmPackages = new Set<string>();
 
         for (const project of projects) {
           for (const pkg of project.Packages) {
-            if (!pkg.Version) continue;
+            if (!pkg.Version || isNonConcreteVersion(pkg.Version)) continue;
 
-            if (!packageMap.has(pkg.Id)) {
-              packageMap.set(pkg.Id, new Map());
+            const key = pkg.Id.toLowerCase();
+            if (!packageMap.has(key)) {
+              packageMap.set(key, new Map());
+              packageNames.set(key, pkg.Id);
             }
-            const versionMap = packageMap.get(pkg.Id)!;
+            // A CPM project can still contain plain Version= references; only count centrally managed ones
+            if (pkg.VersionSource !== "project") cpmPackages.add(key);
+            const versionMap = packageMap.get(key)!;
             if (!versionMap.has(pkg.Version)) {
               versionMap.set(pkg.Version, []);
             }
@@ -545,8 +554,9 @@ export function createHostAPI(): HostAPI {
 
         const inconsistent: InconsistentPackage[] = [];
 
-        for (const [packageId, versionMap] of packageMap) {
+        for (const [key, versionMap] of packageMap) {
           if (versionMap.size <= 1) continue;
+          const packageId = packageNames.get(key) ?? key;
 
           const versions = Array.from(versionMap.entries())
             .map(([version, projects]) => ({ Version: version, Projects: projects }))
@@ -556,7 +566,7 @@ export function createHostAPI(): HostAPI {
             Id: packageId,
             Versions: versions,
             LatestInstalledVersion: versions[0].Version,
-            CpmManaged: anyCpmEnabled,
+            CpmManaged: cpmPackages.has(key),
           });
         }
 
@@ -628,6 +638,7 @@ export function createHostAPI(): HostAPI {
 
         // Fetch vulnerability data from all sources
         const allVulnerabilities = new Map<string, VulnerabilityEntry[]>();
+        const fetchErrors: string[] = [];
         for (const source of sources) {
           try {
             const api = await nugetApiFactory.GetSourceApi(source.Url);
@@ -639,7 +650,12 @@ export function createHostAPI(): HostAPI {
             }
           } catch (e) {
             Logger.warn(`getVulnerablePackages: Failed to fetch vulns from ${source.Url}`, e);
+            fetchErrors.push(formatApiError(e));
           }
+        }
+
+        if (fetchErrors.length === sources.length) {
+          return fail(`Failed to fetch vulnerability data: ${fetchErrors[0]}`);
         }
 
         StatusBarUtils.show(60, "Matching vulnerabilities...");
@@ -736,7 +752,7 @@ export function createHostAPI(): HostAPI {
 
 async function executeRemovePackage(packageId: string, projectPath: string): Promise<void> {
   StatusBarUtils.ShowText(`Removing package ${packageId}...`);
-  const args = ["package", "remove", packageId, "--project", projectPath.replace(/\\/g, "/")];
+  const args = ["remove", projectPath.replace(/\\/g, "/"), "package", packageId];
 
   const task = new vscode.Task(
     { type: "dotnet", task: "dotnet remove package" },
@@ -757,7 +773,7 @@ async function executeAddPackage(
   sourceUrl?: string
 ): Promise<void> {
   StatusBarUtils.ShowText(`Installing package ${packageId} ${version || "latest"}...`);
-  const args = ["package", "add", packageId, "--project", projectPath.replace(/\\/g, "/")];
+  const args = ["add", projectPath.replace(/\\/g, "/"), "package", packageId];
 
   if (version) {
     args.push("--version", version);
@@ -790,10 +806,16 @@ async function getLatestVersion(
   const promises = sources.map(async (source) => {
     try {
       const api = await nugetApiFactory.GetSourceApi(source.Url);
-      const result = await api.GetPackagesAsync(packageId, prerelease, 0, 1);
+      // The top search hit is not necessarily the exact id (e.g. "Foo.Abstractions" for "Foo")
+      const result = await api.GetPackagesAsync(packageId, prerelease, 0, 20);
       const pkg = result.data.find((p) => p.Name.toLowerCase() === packageId.toLowerCase());
       if (pkg) {
         return { version: pkg.Version, sourceUrl: source.Url, sourceName: source.Name };
+      }
+      // Fall back to the registration endpoint when search ranking hides the exact match
+      const registration = await api.GetPackageAsync(packageId, prerelease);
+      if (registration.data?.Version) {
+        return { version: registration.data.Version, sourceUrl: source.Url, sourceName: source.Name };
       }
     } catch {
       // Ignore feed errors
@@ -812,78 +834,4 @@ async function getLatestVersion(
   }
 
   return best;
-}
-
-function compareVersions(a: string, b: string): number {
-  const cleanA = a.replace(/[[\]()]/g, "");
-  const cleanB = b.replace(/[[\]()]/g, "");
-
-  const partsA = cleanA.split(/[.\-+]/).map((p) => {
-    const n = parseInt(p, 10);
-    return isNaN(n) ? p : n;
-  });
-  const partsB = cleanB.split(/[.\-+]/).map((p) => {
-    const n = parseInt(p, 10);
-    return isNaN(n) ? p : n;
-  });
-
-  const maxLen = Math.max(partsA.length, partsB.length);
-  for (let i = 0; i < maxLen; i++) {
-    const pA = partsA[i] ?? 0;
-    const pB = partsB[i] ?? 0;
-
-    if (typeof pA === "number" && typeof pB === "number") {
-      if (pA !== pB) return pA - pB;
-    } else {
-      const cmp = String(pA).localeCompare(String(pB));
-      if (cmp !== 0) return cmp;
-    }
-  }
-  return 0;
-}
-
-/**
- * Checks if a version falls within a NuGet version range.
- * NuGet uses interval notation:
- *   [1.0.0, 2.0.0)  -> >= 1.0.0 AND < 2.0.0
- *   (1.0.0, 2.0.0]  -> > 1.0.0 AND <= 2.0.0
- *   [1.0.0, )        -> >= 1.0.0
- *   (, 2.0.0)        -> < 2.0.0
- */
-function isVersionInRange(version: string, range: string): boolean {
-  const trimmed = range.trim();
-  if (!trimmed) return false;
-
-  const lowerInclusive = trimmed.startsWith("[");
-  const upperInclusive = trimmed.endsWith("]");
-
-  const inner = trimmed.slice(1, -1);
-  const commaIdx = inner.indexOf(",");
-
-  if (commaIdx === -1) {
-    // Exact version match: [1.0.0]
-    if (lowerInclusive && upperInclusive) {
-      return compareVersions(version, inner.trim()) === 0;
-    }
-    return false;
-  }
-
-  const lowerBound = inner.substring(0, commaIdx).trim();
-  const upperBound = inner.substring(commaIdx + 1).trim();
-
-  // Check lower bound
-  if (lowerBound) {
-    const cmp = compareVersions(version, lowerBound);
-    if (lowerInclusive && cmp < 0) return false;
-    if (!lowerInclusive && cmp <= 0) return false;
-  }
-
-  // Check upper bound
-  if (upperBound) {
-    const cmp = compareVersions(version, upperBound);
-    if (upperInclusive && cmp > 0) return false;
-    if (!upperInclusive && cmp >= 0) return false;
-  }
-
-  return true;
 }

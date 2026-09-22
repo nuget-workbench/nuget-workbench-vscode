@@ -1,6 +1,7 @@
 import axios, { AxiosError, AxiosInstance, AxiosProxyConfig, AxiosRequestConfig, AxiosResponse } from "axios";
 import * as vscode from "vscode";
 import { Logger } from "../../common/logger";
+import { isPrerelease } from "../../common/version";
 
 type GetPackagesResponse = {
   data: Array<Package>;
@@ -74,10 +75,10 @@ export default class NuGetApi {
       Verified: item.verified || false,
       Version: item.version || "",
       Versions:
-        item.versions.map((v: any) => ({
+        (item.versions ?? []).map((v: any) => ({
           Version: v.version,
           Id: v["@id"],
-        })) || [],
+        })),
       Tags: item.tags || [],
     }));
 
@@ -132,7 +133,7 @@ export default class NuGetApi {
     // Prerelease versions contain a hyphen (e.g., 1.0.0-beta)
     const filteredItems = prerelease 
       ? items 
-      : items.filter((v: any) => !v.catalogEntry?.version?.includes('-'));
+      : items.filter((v: any) => !isPrerelease(v.catalogEntry?.version ?? ''));
     
     if (!prerelease && filteredItems.length <= 0) {
       // If no stable versions found, fall back to all versions
@@ -170,7 +171,9 @@ export default class NuGetApi {
 
   public ClearPackageCache(packageId?: string) {
     if (packageId) {
-      this._packageCache.delete(packageId.toLowerCase());
+      const id = packageId.toLowerCase();
+      this._packageCache.delete(`${id}::true`);
+      this._packageCache.delete(`${id}::false`);
     } else {
       this._packageCache.clear();
     }
@@ -285,7 +288,9 @@ export default class NuGetApi {
 
       Logger.info(`NuGetApi.GetVulnerabilitiesAsync: Loaded vulnerabilities for ${vulnerabilities.size} packages`);
     } catch (err) {
+      // Do not cache a failed fetch as "no vulnerabilities" - let the caller surface the error
       Logger.error("NuGetApi.GetVulnerabilitiesAsync: Failed to fetch vulnerabilities", err);
+      throw err;
     }
 
     this._vulnerabilityCache = { data: vulnerabilities, timestamp: Date.now() };

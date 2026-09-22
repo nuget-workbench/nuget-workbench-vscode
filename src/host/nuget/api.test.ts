@@ -443,13 +443,16 @@ suite('NuGetApi Tests', () => {
             const api = new NuGetApi('https://api.nuget.org/v3/index.json');
             
             // Directly manipulate the cache for this test
-            (api as any)._packageCache.set('package1', { data: {}, timestamp: Date.now() });
-            (api as any)._packageCache.set('package2', { data: {}, timestamp: Date.now() });
+            // Keys match the format written by GetPackageAsync: "<id>::<prerelease>"
+            (api as any)._packageCache.set('package1::true', { data: {}, timestamp: Date.now() });
+            (api as any)._packageCache.set('package1::false', { data: {}, timestamp: Date.now() });
+            (api as any)._packageCache.set('package2::true', { data: {}, timestamp: Date.now() });
 
             api.ClearPackageCache('Package1'); // Should be case-insensitive
 
-            assert.strictEqual((api as any)._packageCache.has('package1'), false);
-            assert.strictEqual((api as any)._packageCache.has('package2'), true);
+            assert.strictEqual((api as any)._packageCache.has('package1::true'), false);
+            assert.strictEqual((api as any)._packageCache.has('package1::false'), false);
+            assert.strictEqual((api as any)._packageCache.has('package2::true'), true);
         });
     });
 
