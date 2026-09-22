@@ -2,6 +2,7 @@ import { LitElement, css, html, nothing } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 import { PackageViewModel } from "../types";
 import codicon from "@/web/styles/codicon.css";
+import { compareVersions } from "@/common/version";
 import { sharedStyles } from "@/web/styles/shared.css";
 
 export interface PackageRowData {
@@ -164,7 +165,21 @@ export class PackageRow extends LitElement {
   @property() updateVersion: string = "";
   @property({ type: Object }) package!: PackageViewModel;
   @property({ type: Number }) revision: number = 0;
+  /** Selection state. Passed separately so Lit re-renders when the selection moves. */
+  @property({ type: Boolean }) selected?: boolean;
   @state() iconUrl: string | null = null;
+
+  private get isSelected(): boolean {
+    return this.selected ?? this.package?.Selected ?? false;
+  }
+
+  protected willUpdate(changed: Map<string, unknown>): void {
+    // Rows can be reused for a different package; forget a previous icon load failure
+    const previous = changed.get("package") as PackageViewModel | undefined;
+    if (changed.has("package") && previous?.IconUrl !== this.package?.IconUrl) {
+      this.iconUrl = null;
+    }
+  }
 
   get resolvedIconUrl(): string {
     if (!this.package?.IconUrl) {
@@ -198,10 +213,13 @@ export class PackageRow extends LitElement {
       return html`${this.package.Version}`;
     }
 
+    const installed = this.package.InstalledVersion;
     const hasUpdate =
       this.package.Status === "Detailed" &&
-      this.package.Version !== this.package.InstalledVersion &&
-      this.package.AllowsUpdate;
+      this.package.AllowsUpdate &&
+      !!installed &&
+      !!this.package.Version &&
+      (installed === "Multiple" || compareVersions(this.package.Version, installed) > 0);
 
     return html`
       ${this.package.InstalledVersion}
@@ -215,7 +233,12 @@ export class PackageRow extends LitElement {
           ></span>`
         : nothing}
       ${hasUpdate
-        ? html`<span class="codicon codicon-arrow-circle-up"></span>`
+        ? html`<span
+            class="codicon codicon-arrow-circle-up"
+            role="img"
+            aria-label="Update available: ${this.package.Version}"
+            title="Update available: ${this.package.Version}"
+          ></span>`
         : nothing}
     `;
   }
@@ -227,10 +250,10 @@ export class PackageRow extends LitElement {
 
     return html`
       <div
-        class="package-row ${this.package.Selected ? "package-row-selected" : ""} ${this.package.Status === "Error" ? "package-row-error" : ""}"
+        class="package-row ${this.isSelected ? "package-row-selected" : ""} ${this.package.Status === "Error" ? "package-row-error" : ""}"
         role="option"
         tabindex="0"
-        aria-selected=${this.package.Selected ? "true" : "false"}
+        aria-selected=${this.isSelected ? "true" : "false"}
         @keydown=${(e: KeyboardEvent) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();

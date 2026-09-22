@@ -58,7 +58,15 @@ export class SettingsView extends LitElement {
                 grid-template-columns: 20% 35% 45%;
                 grid-column-gap: 10px;
                 &.data-row {
+                  grid-template-columns: 20% 25% 30% 50px;
+                  /* Actions stay in the tab order and appear on hover or keyboard focus */
                   .actions {
+                    display: flex;
+                    gap: 2px;
+                    opacity: 0;
+                  }
+                  &:first-child .actions {
+                    /* The default nuget.org source cannot be edited or removed */
                     display: none;
                   }
                   .label {
@@ -67,14 +75,11 @@ export class SettingsView extends LitElement {
                     overflow: hidden;
                     text-overflow: ellipsis;
                   }
-                  &:hover {
-                    grid-template-columns: 20% 25% 30% 50px;
+                  &:hover,
+                  &:focus-within {
                     background-color: var(--vscode-list-hoverBackground);
-                    &:not(:first-child) {
-                      .actions {
-                        display: flex;
-                        gap: 2px;
-                      }
+                    .actions {
+                      opacity: 1;
                     }
                   }
                 }
@@ -98,17 +103,41 @@ export class SettingsView extends LitElement {
         cursor: pointer;
       }
 
+      button:hover {
+        background: var(--vscode-button-hoverBackground);
+      }
+
+      button:focus-visible {
+        outline: 1px solid var(--vscode-focusBorder);
+        outline-offset: 1px;
+      }
+
       button.icon-btn {
         background: transparent;
         border: none;
         color: var(--vscode-icon-foreground);
         cursor: pointer;
         padding: 2px;
+        border-radius: 3px;
+      }
+
+      button.icon-btn:hover {
+        background: var(--vscode-toolbar-hoverBackground);
       }
 
       button.secondary-btn {
         background: var(--vscode-button-secondaryBackground);
         color: var(--vscode-button-secondaryForeground);
+      }
+
+      button.secondary-btn:hover {
+        background: var(--vscode-button-secondaryHoverBackground);
+      }
+
+      .validation-error {
+        color: var(--vscode-errorForeground);
+        font-size: 12px;
+        margin: 2px 0 6px;
       }
 
       input[type="text"] {
@@ -126,6 +155,7 @@ export class SettingsView extends LitElement {
   @state() private enablePackageVersionInlineInfo: boolean = false;
   @state() private newSource: SourceViewModel | null = null;
   @state() private sources: SourceViewModel[] = [];
+  @state() private validationError: string = "";
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -173,21 +203,47 @@ export class SettingsView extends LitElement {
     this.updateConfiguration();
   }
 
+  /** Drops a row that was never filled in, without asking for confirmation. */
+  private discardEmptyRow(source: SourceViewModel): void {
+    this.sources = this.sources.filter((s) => s !== source);
+  }
+
   private saveRow(source: SourceViewModel): void {
-    if (this.newSource?.Id === source.Id) this.newSource = null;
-    source.Save();
-    if (source.Name === "" && source.Url === "") {
-      this.removeRow(source);
+    const name = source.DraftName.trim();
+    const url = source.DraftUrl.trim();
+    const isNew = this.newSource?.Id === source.Id;
+
+    if (name === "" && url === "") {
+      if (isNew) this.newSource = null;
+      source.Cancel();
+      if (source.Name === "" && source.Url === "") {
+        this.discardEmptyRow(source);
+      } else {
+        this.requestUpdate();
+      }
       return;
     }
+
+    if (name === "" || !/^(https?:\/\/|[a-zA-Z]:[\\/]|\/|\.{1,2}[\\/])/.test(url)) {
+      this.validationError =
+        name === "" ? "Enter a name for the source." : "Enter an http(s) URL or a local folder path.";
+      return;
+    }
+
+    this.validationError = "";
+    source.DraftName = name;
+    source.DraftUrl = url;
+    if (isNew) this.newSource = null;
+    source.Save();
     this.requestUpdate();
     this.updateConfiguration();
   }
 
   private cancelRow(source: SourceViewModel): void {
     if (this.newSource?.Id === source.Id) this.newSource = null;
+    this.validationError = "";
     if (source.Name === "" && source.Url === "") {
-      this.removeRow(source);
+      this.discardEmptyRow(source);
     } else {
       source.Cancel();
       this.requestUpdate();
@@ -201,6 +257,7 @@ export class SettingsView extends LitElement {
           <input
             type="text"
             placeholder="Name"
+            aria-label="Source name"
             .value=${source.DraftName}
             @input=${(e: Event) => {
               source.DraftName = (e.target as HTMLInputElement).value;
@@ -209,6 +266,7 @@ export class SettingsView extends LitElement {
           <input
             type="text"
             placeholder="Url"
+            aria-label="Source URL"
             .value=${source.DraftUrl}
             @input=${(e: Event) => {
               source.DraftUrl = (e.target as HTMLInputElement).value;
@@ -217,6 +275,7 @@ export class SettingsView extends LitElement {
           <input
             type="text"
             placeholder="Password Script Path (optional)"
+            aria-label="Password script path (optional)"
             .value=${source.DraftPasswordScriptPath}
             @input=${(e: Event) => {
               source.DraftPasswordScriptPath = (e.target as HTMLInputElement).value;
@@ -227,19 +286,22 @@ export class SettingsView extends LitElement {
             <button class="secondary-btn" @click=${() => this.cancelRow(source)}>Cancel</button>
           </div>
         </div>
+        ${this.validationError
+          ? html`<div class="validation-error" role="alert">${this.validationError}</div>`
+          : nothing}
       `;
     }
 
     return html`
       <div class="row data-row">
-        <span class="label">${source.Name}</span>
-        <span class="label">${source.Url}</span>
-        <span class="label">${source.PasswordScriptPath}</span>
+        <span class="label" title=${source.Name}>${source.Name}</span>
+        <span class="label" title=${source.Url}>${source.Url}</span>
+        <span class="label" title=${source.PasswordScriptPath ?? ""}>${source.PasswordScriptPath}</span>
         <div class="actions">
-          <button class="icon-btn" aria-label="Edit source" title="Edit" @click=${() => this.editRow(source)}>
+          <button class="icon-btn" aria-label="Edit source ${source.Name}" title="Edit" @click=${() => this.editRow(source)}>
             <span class="codicon codicon-edit"></span>
           </button>
-          <button class="icon-btn" aria-label="Remove source" title="Remove" @click=${() => this.removeRow(source)}>
+          <button class="icon-btn" aria-label="Remove source ${source.Name}" title="Remove" @click=${() => this.removeRow(source)}>
             <span class="codicon codicon-close"></span>
           </button>
         </div>

@@ -517,14 +517,12 @@ export function createHostAPI(): HostAPI {
         }
 
         const projects: Project[] = [];
-        let anyCpmEnabled = false;
 
         for (const file of projectFiles) {
           try {
             const cpmVersions = await CpmResolver.GetPackageVersions(file.fsPath);
             const project = await ProjectParser.Parse(file.fsPath, cpmVersions);
             project.CpmEnabled = cpmVersions !== null;
-            if (project.CpmEnabled) anyCpmEnabled = true;
             projects.push(project);
           } catch (e) {
             Logger.error(`getInconsistentPackages: Failed to parse ${file.fsPath}`, e);
@@ -533,6 +531,7 @@ export function createHostAPI(): HostAPI {
 
         const packageMap = new Map<string, Map<string, Array<{ Name: string; Path: string }>>>();
         const packageNames = new Map<string, string>();
+        const cpmPackages = new Set<string>();
 
         for (const project of projects) {
           for (const pkg of project.Packages) {
@@ -543,6 +542,7 @@ export function createHostAPI(): HostAPI {
               packageMap.set(key, new Map());
               packageNames.set(key, pkg.Id);
             }
+            if (project.CpmEnabled) cpmPackages.add(key);
             const versionMap = packageMap.get(key)!;
             if (!versionMap.has(pkg.Version)) {
               versionMap.set(pkg.Version, []);
@@ -565,7 +565,7 @@ export function createHostAPI(): HostAPI {
             Id: packageId,
             Versions: versions,
             LatestInstalledVersion: versions[0].Version,
-            CpmManaged: anyCpmEnabled,
+            CpmManaged: cpmPackages.has(key),
           });
         }
 

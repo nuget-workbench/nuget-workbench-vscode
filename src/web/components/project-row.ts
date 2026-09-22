@@ -5,6 +5,7 @@ import { sharedStyles } from "@/web/styles/shared.css";
 import { hostApi } from "../registrations";
 import { ProjectPackageViewModel, ProjectViewModel } from "../types";
 import type { UpdateProjectRequest } from "@/common/rpc/types";
+import { compareVersions } from "@/common/version";
 
 const styles = css`
   .project-row {
@@ -23,6 +24,8 @@ const styles = css`
     .project-title {
       overflow: hidden;
       text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
       .name {
         font-weight: bold;
       }
@@ -35,6 +38,15 @@ const styles = css`
 
       .spinner {
         margin: 3px;
+      }
+
+      .version {
+        font-family: var(--vscode-editor-font-family);
+        font-size: 12px;
+      }
+
+      .row-error {
+        cursor: help;
       }
     }
   }
@@ -49,9 +61,11 @@ export class ProjectRow extends LitElement {
   @property() packageVersion!: string;
   @property() sourceUrl!: string;
   @state() private loaders = new Map<string, boolean>();
+  @state() private errors = new Map<string, string>();
 
   get projectPackage() {
-    return this.project.Packages.find((x) => x.Id === this.packageId);
+    const id = this.packageId?.toLowerCase();
+    return this.project.Packages.find((x) => x.Id.toLowerCase() === id);
   }
 
   private async update_(type: "INSTALL" | "UNINSTALL" | "UPDATE"): Promise<void> {
@@ -72,10 +86,13 @@ export class ProjectRow extends LitElement {
     };
 
     this.loaders.set(request.PackageId, true);
+    this.errors.delete(request.PackageId);
     this.requestUpdate();
 
     const result = await hostApi.updateProject(request);
-    if (result.ok) {
+    if (!result.ok) {
+      this.errors.set(request.PackageId, result.error);
+    } else {
       this.project.Packages = result.value.Project.Packages.map(
         (x) => new ProjectPackageViewModel(x)
       );
@@ -94,35 +111,58 @@ export class ProjectRow extends LitElement {
 
   private renderActions() {
     if (this.loaders.get(this.packageId) === true) {
-      return html`<span class="spinner medium" role="status" aria-label="Loading"></span>`;
+      return html`<span class="spinner medium" role="status" aria-label="Working on ${this.packageId}"></span>`;
     }
+
+    const error = this.errors.get(this.packageId);
+    const errorIcon = error
+      ? html`<span class="row-error" role="img" aria-label="Operation failed: ${error}" title=${error}>
+          <span class="codicon codicon-error"></span>
+        </span>`
+      : nothing;
 
     const pkg = this.projectPackage;
     const version = pkg?.Version;
+    const target = this.packageVersion;
 
     if (pkg === undefined) {
       return html`
-        <button class="icon-btn" aria-label="Install package" title="Install" @click=${() => this.update_("INSTALL")}>
+        ${errorIcon}
+        <button
+          class="icon-btn"
+          aria-label="Install ${this.packageId}${target ? ` ${target}` : ""} in ${this.project.Name}"
+          title=${target ? `Install ${target}` : "Install"}
+          @click=${() => this.update_("INSTALL")}
+        >
           <span class="codicon codicon-diff-added"></span>
         </button>
       `;
     }
 
-    const showUpdate =
-      version !== this.packageVersion &&
-      version !== undefined &&
-      !pkg.IsPinned;
+    const canChange = !!version && !!target && version !== target && !pkg.IsPinned;
+    const isDowngrade = canChange && compareVersions(target, version!) < 0;
 
     return html`
-      <span class="version">${version}</span>
-      ${showUpdate
+      ${errorIcon}
+      <span class="version" title=${pkg.IsPinned ? "Pinned version" : ""}>${version}</span>
+      ${canChange
         ? html`
-            <button class="icon-btn" aria-label="Update package" title="Update" @click=${() => this.update_("UPDATE")}>
-              <span class="codicon codicon-arrow-circle-up"></span>
+            <button
+              class="icon-btn"
+              aria-label="${isDowngrade ? "Downgrade" : "Update"} ${this.packageId} to ${target} in ${this.project.Name}"
+              title="${isDowngrade ? "Downgrade" : "Update"} to ${target}"
+              @click=${() => this.update_("UPDATE")}
+            >
+              <span class="codicon ${isDowngrade ? "codicon-arrow-circle-down" : "codicon-arrow-circle-up"}"></span>
             </button>
           `
         : nothing}
-      <button class="icon-btn" aria-label="Uninstall package" title="Uninstall" @click=${() => this.update_("UNINSTALL")}>
+      <button
+        class="icon-btn"
+        aria-label="Uninstall ${this.packageId} from ${this.project.Name}"
+        title="Uninstall"
+        @click=${() => this.update_("UNINSTALL")}
+      >
         <span class="codicon codicon-diff-removed"></span>
       </button>
     `;
@@ -131,7 +171,7 @@ export class ProjectRow extends LitElement {
   render() {
     return html`
       <div class="project-row">
-        <div class="project-title">
+        <div class="project-title" title=${this.project.Path}>
           <span class="name">${this.project.Name}</span>
         </div>
         <div class="project-actions">${this.renderActions()}</div>
