@@ -48,18 +48,18 @@ export default class CpmResolver {
       // Check if Directory.Packages.props has CPM enabled
       const cpmContent = await fs.promises.readFile(cpmFilePath, "utf8");
       const cpmDoc = new DOMParser().parseFromString(cpmContent);
-      const cpmEnabled = xpath.select("string(//PropertyGroup/ManagePackageVersionsCentrally)", cpmDoc);
+      const cpmEnabled = xpath.select("string(//*[local-name()='PropertyGroup']/*[local-name()='ManagePackageVersionsCentrally'])", cpmDoc);
 
-      if (cpmEnabled !== "true") {
+      if (String(cpmEnabled).trim().toLowerCase() !== "true") {
         return false;
       }
 
       // Check if project has CPM disabled
       const projectContent = await fs.promises.readFile(projectPath, "utf8");
       const projectDoc = new DOMParser().parseFromString(projectContent);
-      const projectCpmSetting = xpath.select("string(//PropertyGroup/ManagePackageVersionsCentrally)", projectDoc);
+      const projectCpmSetting = xpath.select("string(//*[local-name()='PropertyGroup']/*[local-name()='ManagePackageVersionsCentrally'])", projectDoc);
 
-      if (projectCpmSetting === "false") {
+      if (String(projectCpmSetting).trim().toLowerCase() === "false") {
         return false;
       }
 
@@ -81,7 +81,7 @@ export default class CpmResolver {
     try {
       const cpmContent = await fs.promises.readFile(cpmFilePath, "utf8");
       const document = new DOMParser().parseFromString(cpmContent);
-      const packageVersions = xpath.select("//ItemGroup/PackageVersion", document) as Node[];
+      const packageVersions = xpath.select("//*[local-name()='ItemGroup']/*[local-name()='PackageVersion']", document) as Node[];
 
       (packageVersions || []).forEach((p: any) => {
         const packageId = p.attributes?.getNamedItem("Include")?.value;

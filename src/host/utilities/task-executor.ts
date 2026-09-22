@@ -19,18 +19,42 @@ export class TaskExecutor {
     }
 
     const releaser = await this.globalMutex.acquire();
-    const mutex = new Mutex();
-    mutex.acquire();
-    const execution = await vscode.tasks.executeTask(task);
-    const callback = vscode.tasks.onDidEndTask((x) => {
-      if (x.execution.task == execution.task) {
-        Logger.info(`TaskExecutor.ExecuteTask: Task ${task.name} completed`);
-        mutex.release();
+    const disposables: vscode.Disposable[] = [];
+    try {
+      const started: { execution?: vscode.TaskExecution } = {};
+      // Tasks are serialized by the global mutex, so an end event for a task with the same
+      // name/source that arrives before executeTask() resolves belongs to this execution.
+      const isOwnExecution = (e: vscode.TaskExecution) =>
+        started.execution
+          ? e === started.execution || e.task === started.execution.task
+          : e.task.name === task.name && e.task.source === task.source;
+
+      // Subscribe before starting the task so fast-finishing tasks are not missed.
+      // onDidEndTaskProcess carries the exit code; onDidEndTask is a fallback for tasks
+      // whose process never started. The first event to arrive wins.
+      const finished = new Promise<number | undefined>((resolve) => {
+        disposables.push(
+          vscode.tasks.onDidEndTaskProcess((e) => {
+            if (isOwnExecution(e.execution)) resolve(e.exitCode);
+          }),
+          vscode.tasks.onDidEndTask((e) => {
+            if (isOwnExecution(e.execution)) resolve(undefined);
+          })
+        );
+      });
+
+      started.execution = await vscode.tasks.executeTask(task);
+      const exitCode = await finished;
+
+      if (exitCode !== undefined && exitCode !== 0) {
+        Logger.error(`TaskExecutor.ExecuteTask: Task ${task.name} failed with exit code ${exitCode}`);
+        throw new Error(`dotnet exited with code ${exitCode}. See the terminal output for details.`);
       }
-    });
-    await mutex.waitForUnlock();
-    releaser();
-    callback.dispose();
+      Logger.info(`TaskExecutor.ExecuteTask: Task ${task.name} completed`);
+    } finally {
+      disposables.forEach((d) => d.dispose());
+      releaser();
+    }
   }
 }
 
