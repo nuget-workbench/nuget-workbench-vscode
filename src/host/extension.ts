@@ -69,39 +69,47 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     vscode.commands.registerCommand("nugetWorkbench.openSettings", () => {
+      vscode.commands.executeCommand("nugetWorkbench.packageView.focus");
       provider.sendNavigateToRoute("SETTINGS");
     })
   );
 }
 
+type ViewCommand =
+  | { type: "command"; command: "search"; query: string }
+  | { type: "command"; command: "navigate-tab"; tab: string }
+  | { type: "command"; command: "navigate-route"; route: string };
+
 class NugetViewProvider implements vscode.WebviewViewProvider {
   private rpcHost: RpcHost | undefined;
   private webviewView: vscode.WebviewView | undefined;
+  private webviewReady = false;
+  private pendingCommands: ViewCommand[] = [];
 
   constructor(private readonly _extensionUri: vscode.Uri) {}
 
   sendSearchQuery(query: string): void {
-    this.webviewView?.webview.postMessage({
-      type: "command",
-      command: "search",
-      query,
-    });
+    this.postCommand({ type: "command", command: "search", query });
   }
 
   sendNavigateToTab(tab: string): void {
-    this.webviewView?.webview.postMessage({
-      type: "command",
-      command: "navigate-tab",
-      tab,
-    });
+    this.postCommand({ type: "command", command: "navigate-tab", tab });
   }
 
   sendNavigateToRoute(route: string): void {
-    this.webviewView?.webview.postMessage({
-      type: "command",
-      command: "navigate-route",
-      route,
-    });
+    this.postCommand({ type: "command", command: "navigate-route", route });
+  }
+
+  /**
+   * The view is only created when it is first shown, and its UI needs the configuration before
+   * it can handle a command. Commands sent earlier are delivered once the webview reports ready.
+   */
+  private postCommand(command: ViewCommand): void {
+    if (this.webviewView && this.webviewReady) {
+      this.webviewView.webview.postMessage(command);
+    } else {
+      this.pendingCommands.push(command);
+    }
   }
 
   resolveWebviewView(
@@ -112,6 +120,21 @@ class NugetViewProvider implements vscode.WebviewViewProvider {
     Logger.debug("NugetViewProvider.resolveWebviewView: Resolving webview view");
 
     this.webviewView = webviewView;
+    this.webviewReady = false;
+
+    webviewView.webview.onDidReceiveMessage((msg: unknown) => {
+      if ((msg as { type?: string } | null)?.type !== "webview-ready") return;
+      this.webviewReady = true;
+      for (const command of this.pendingCommands.splice(0)) {
+        webviewView.webview.postMessage(command);
+      }
+    });
+    webviewView.onDidDispose(() => {
+      if (this.webviewView === webviewView) {
+        this.webviewView = undefined;
+        this.webviewReady = false;
+      }
+    });
 
     // Dispose previous RPC host if webview is re-resolved
     this.rpcHost?.dispose();

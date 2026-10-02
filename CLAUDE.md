@@ -14,6 +14,7 @@ npm run package          # Package extension (.vsix) into releases/
 ```
 
 Build produces two separate bundles via `esbuild.js`:
+
 - **Host**: `src/host/extension.ts` -> `dist/extension.js` (Node.js, CommonJS)
 - **Web**: `src/web/main.ts` -> `dist/web.js` (Browser, ESM)
 
@@ -53,7 +54,7 @@ UI uses **Lit** (LitElement) with native HTML elements styled via VS Code CSS va
 ### Key Components
 
 | Component | File | Purpose |
-|-----------|------|---------|
+| ----------- | ------ | --------- |
 | `packages-view` | `src/web/components/packages-view.ts` | Main 3-pane layout (project tree / packages / details) with Split.js |
 | `project-tree` | `src/web/components/project-tree.ts` | Checkbox tree for project selection |
 | `updates-view` | `src/web/components/updates-view.ts` | Outdated packages tab |

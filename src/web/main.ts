@@ -1,6 +1,6 @@
 import { LitElement, html } from "lit";
 import { customElement, state } from "lit/decorators.js";
-import { configuration, router } from "./registrations";
+import { configuration, notifyWebviewReady, router } from "./registrations";
 import type { PackagesView } from "./components/packages-view";
 
 // Import all Lit components (they self-register via @customElement)
@@ -28,11 +28,17 @@ type HostCommand =
 export class NuGetWorkbench extends LitElement {
   @state() private configLoaded = false;
   @state() private currentRoute = router.CurrentRoute;
+  private readySent = false;
 
   connectedCallback() {
     super.connectedCallback();
     configuration.addEventListener("configuration-changed", () => {
       this.configLoaded = configuration.Configuration != null;
+      if (this.configLoaded && !this.readySent) {
+        this.readySent = true;
+        // Commands the extension received before the UI existed are delivered after this
+        this.updateComplete.then(() => notifyWebviewReady());
+      }
     });
     router.addEventListener("route-changed", () => {
       this.currentRoute = router.CurrentRoute;

@@ -25,8 +25,8 @@ suite('CpmResolver Tests', () => {
         fs.mkdirSync(projectDir, { recursive: true });
         projectPath = path.join(projectDir, 'MyProject.csproj');
 
-        // Default project content
-        fs.writeFileSync(projectPath, '<Project><PropertyGroup><ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally></PropertyGroup></Project>');
+        // Default project content: CPM is usually switched on outside the project file
+        fs.writeFileSync(projectPath, '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>');
 
         // Reset cache before each test
         CpmResolver.ClearCache();
@@ -106,6 +106,55 @@ suite('CpmResolver Tests', () => {
         assert.strictEqual(versions, null);
     });
 
+    test('GetPackageVersions detects CPM enabled in Directory.Build.props', async () => {
+        fs.writeFileSync(path.join(tmpDir, 'Directory.Build.props'), `
+            <Project>
+                <PropertyGroup>
+                    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+                </PropertyGroup>
+            </Project>`);
+        fs.writeFileSync(path.join(tmpDir, 'Directory.Packages.props'), `
+            <Project>
+                <ItemGroup>
+                    <PackageVersion Include="Package.A" Version="1.0.0" />
+                </ItemGroup>
+            </Project>`);
+
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
+        assert.strictEqual(versions?.get('Package.A'), '1.0.0');
+    });
+
+    test('GetPackageVersions detects CPM enabled in the project file', async () => {
+        fs.writeFileSync(projectPath, '<Project><PropertyGroup><ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally></PropertyGroup></Project>');
+        fs.writeFileSync(path.join(tmpDir, 'Directory.Packages.props'), `
+            <Project>
+                <ItemGroup>
+                    <PackageVersion Include="Package.A" Version="1.0.0" />
+                </ItemGroup>
+            </Project>`);
+
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
+        assert.strictEqual(versions?.get('Package.A'), '1.0.0');
+    });
+
+    test('Directory.Packages.props overrides Directory.Build.props', async () => {
+        fs.writeFileSync(path.join(tmpDir, 'Directory.Build.props'), `
+            <Project>
+                <PropertyGroup>
+                    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+                </PropertyGroup>
+            </Project>`);
+        fs.writeFileSync(path.join(tmpDir, 'Directory.Packages.props'), `
+            <Project>
+                <PropertyGroup>
+                    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+                </PropertyGroup>
+            </Project>`);
+
+        const versions = await CpmResolver.GetPackageVersions(projectPath);
+        assert.strictEqual(versions, null);
+    });
+
     test('GetPackageVersions parses versions when CPM is enabled', async () => {
         const cpmPath = path.join(tmpDir, 'Directory.Packages.props');
         const cpmContent = `
@@ -173,11 +222,17 @@ suite('CpmResolver Tests', () => {
                     <PackageVersion Include="Test.Package" Version="2.0.0" />
                 </ItemGroup>
             </Project>`;
-        fs.writeFileSync(cpmPath, cpmContent2);
+        // Unchanged file: the cached map is reused
+        const cached = await CpmResolver.GetPackageVersions(projectPath);
+        assert.strictEqual(cached, versions);
 
-        // Second call should return cached value
+        // A file edited outside the extension is read again
+        fs.writeFileSync(cpmPath, cpmContent2);
+        const later = new Date(Date.now() + 5000);
+        fs.utimesSync(cpmPath, later, later);
+
         versions = await CpmResolver.GetPackageVersions(projectPath);
-        assert.strictEqual(versions!.get('Test.Package'), '1.0.0');
+        assert.strictEqual(versions!.get('Test.Package'), '2.0.0');
     });
 
     test('ClearCache clears the cache', async () => {

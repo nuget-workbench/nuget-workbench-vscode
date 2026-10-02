@@ -41,7 +41,7 @@
 ## Features
 
 | | Feature | Description |
-|---|---|---|
+| --- | --- | --- |
 | 📦 | **Browse & Install** | Search nuget.org and private feeds, install into one or multiple projects at once |
 | 🔄 | **One-click Updates** | See all outdated packages with version diffs, update individually or all at once |
 | 🛡️ | **Vulnerability Scanning** | Color-coded CVE severity badges (Critical / High / Medium / Low) with advisory links |
@@ -171,7 +171,7 @@ The collapsible project tree on the left of the main view lets you scope operati
 Access these from the Command Palette (`Ctrl+Shift+P`):
 
 | Command | ID | Description |
-|---|---|---|
+| --- | --- | --- |
 | **NuGet Workbench: Open Packages** | `nugetWorkbench.open` | Focus the NuGet panel |
 | **NuGet Workbench: Add Package** | `nugetWorkbench.install` | Prompt for a package ID and open Browse with it pre-searched |
 | **NuGet Workbench: Update Package** | `nugetWorkbench.update` | Focus the NuGet panel and switch to the Updates tab |
@@ -186,7 +186,7 @@ Access these from the Command Palette (`Ctrl+Shift+P`):
 Open VS Code Settings (`Ctrl+,`) and search for **NuGet Workbench**, or edit `settings.json` directly.
 
 | Setting | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `NugetWorkbench.sources` | `string[]` | `[nuget.org]` | List of NuGet feed URLs to search and update from. Each entry is a JSON string `{"name":"...","url":"..."}`. |
 | `NugetWorkbench.defaultSource` | `string` | `""` | Default source URL pre-selected in the source dropdown. Empty = use the first configured source. |
 | `NugetWorkbench.prerelease` | `boolean` | `false` | Include pre-release versions when checking for updates. |
@@ -219,7 +219,9 @@ NuGet Workbench supports private package feeds out of the box.
 
 ### NuGet.config (automatic)
 
-The extension reads credentials stored in any `NuGet.config` file in your workspace or the global `%APPDATA%\NuGet\NuGet.Config`. If your feed credentials are already configured there, no extra setup is needed.
+The extension reads sources and credentials from the `NuGet.config` in your workspace root (or its `.nuget` folder) and from the user-level `NuGet.Config` (`%APPDATA%\NuGet\NuGet.Config` on Windows, `~/.nuget/NuGet/NuGet.Config` on macOS/Linux). If your feed credentials are already configured there, no extra setup is needed.
+
+The files are merged like NuGet does: the workspace file overrides sources with the same key, `<clear/>` removes the sources inherited from the user-level file, and `<disabledPackageSources>` is honored. Sources from the `NugetWorkbench.sources` setting are added on top, unless a `NuGet.config` disables or clears a source with the same name.
 
 ### Azure Artifacts Credential Provider
 
@@ -233,16 +235,18 @@ The credential provider handles token refresh automatically.
 
 ### Custom Password Script
 
-For non-standard authentication flows, configure a script path per source. The script receives the feed URL as an argument and must print the password to stdout:
+If the password stored in `NuGet.config` is encrypted or encoded, configure a script that decodes it. The script receives the stored password value as its only argument and must print the decoded password to stdout. Set the script path in **Settings > Sources** (edit icon of the source), or add an entry with the source name to the `NugetWorkbench.sources` setting:
 
 ```jsonc
 // settings.json
 {
   "NugetWorkbench.sources": [
-    "{\"name\": \"Internal\", \"url\": \"https://my.internal.feed/v3/index.json\", \"passwordScriptPath\": \"/path/to/get-token.sh\"}"
+    "{\"name\": \"Internal\", \"passwordScriptPath\": \"/path/to/decode-password.sh\"}"
   ]
 }
 ```
+
+`.ps1` scripts run with `powershell.exe` on Windows and `pwsh` on macOS/Linux, `.bat`/`.cmd` with `cmd.exe`; other files are executed directly. Relative paths are resolved against the workspace folder. A script must finish within two minutes.
 
 ---
 
@@ -276,6 +280,7 @@ Contributions are welcome — bug reports, feature requests, documentation impro
 ### Reporting Issues
 
 Please use the [GitHub Issues](https://github.com/nuget-workbench/nuget-workbench-vscode/issues) tracker. Include:
+
 - VS Code version
 - Extension version
 - Steps to reproduce

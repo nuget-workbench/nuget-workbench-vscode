@@ -79,7 +79,7 @@ export class Logger {
             return;
         }
 
-        const formattedMessage = util.format(message, ...args);
+        const formattedMessage = util.format(message, ...args.map(sanitizeLogArg));
         if (this._outputChannel) {
             const timestamp = new Date().toISOString();
             this._outputChannel.appendLine(`${timestamp} [${level}] ${formattedMessage}`);
@@ -119,4 +119,28 @@ export class Logger {
         }
         span.end(endTime);
     }
+}
+
+/**
+ * Axios errors carry the full request config and raw request, including the
+ * Authorization header. Reduce them to non-sensitive fields before logging.
+ */
+function sanitizeLogArg(arg: unknown): unknown {
+    if (arg && typeof arg === 'object' && (arg as { isAxiosError?: boolean }).isAxiosError) {
+        const err = arg as {
+            message?: string;
+            code?: string;
+            config?: { method?: string; url?: string };
+            response?: { status?: number; statusText?: string };
+        };
+        return {
+            message: err.message,
+            code: err.code,
+            method: err.config?.method,
+            url: err.config?.url,
+            status: err.response?.status,
+            statusText: err.response?.statusText,
+        };
+    }
+    return arg;
 }

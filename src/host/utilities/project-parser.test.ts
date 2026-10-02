@@ -121,4 +121,38 @@ suite('ProjectParser Tests', () => {
         const project = await ProjectParser.Parse(projectPath);
         assert.strictEqual(project.Packages.length, 0);
     });
+
+    test('Parse skips PackageReference items without Include (Update/Remove)', async () => {
+        const projectPath = path.join(tmpDir, 'update.csproj');
+        const xml = `
+            <Project>
+                <ItemGroup>
+                    <PackageReference Include="Serilog" Version="2.10.0" />
+                    <PackageReference Update="Newtonsoft.Json" Version="13.0.3" />
+                    <PackageReference Remove="Foo" />
+                </ItemGroup>
+            </Project>`;
+        fs.writeFileSync(projectPath, xml);
+
+        const project = await ProjectParser.Parse(projectPath);
+
+        assert.strictEqual(project.Packages.length, 1);
+        assert.strictEqual(project.Packages[0].Id, 'Serilog');
+    });
+
+    test('Parse resolves CPM versions case-insensitively', async () => {
+        const projectPath = path.join(tmpDir, 'cpm-case.csproj');
+        fs.writeFileSync(projectPath, `
+            <Project>
+                <ItemGroup>
+                    <PackageReference Include="newtonsoft.json" />
+                </ItemGroup>
+            </Project>`);
+
+        const cpmVersions = new Map<string, string>([['Newtonsoft.Json', '13.0.3']]);
+        const project = await ProjectParser.Parse(projectPath, cpmVersions);
+
+        assert.strictEqual(project.Packages[0].Version, '13.0.3');
+        assert.strictEqual(project.Packages[0].VersionSource, 'central');
+    });
 });

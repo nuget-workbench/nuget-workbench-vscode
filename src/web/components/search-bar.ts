@@ -10,7 +10,8 @@ import lodash from "lodash";
 const styles = css`
   .search-bar {
     display: flex;
-    gap: 10px;
+    flex-wrap: wrap;
+    gap: 6px 10px;
     justify-content: space-between;
     margin-bottom: 10px;
 
@@ -48,12 +49,13 @@ const styles = css`
 
     .search-bar-right {
       display: flex;
+      flex-wrap: wrap;
       gap: 10px;
     }
   }
 `;
 
-export type SortOption = "relevance" | "downloads" | "recent" | "name-asc";
+export type SortOption = "relevance" | "downloads" | "name-asc";
 
 export type FilterEvent = {
   Query: string;
@@ -79,10 +81,16 @@ export class SearchBar extends LitElement {
     this.emitFilterChangedEvent();
   }
 
+  disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this.delayedPackagesLoader.cancel();
+  }
+
   private async prereleaseChangedEvent(target: EventTarget): Promise<void> {
     this.prerelease = (target as HTMLInputElement).checked;
-    await this.savePrereleaseToConfiguration();
+    // Refresh the results right away; persisting the setting can happen in the background
     this.emitFilterChangedEvent();
+    await this.savePrereleaseToConfiguration();
   }
 
   private async savePrereleaseToConfiguration(): Promise<void> {
@@ -106,6 +114,24 @@ export class SearchBar extends LitElement {
     this.delayedPackagesLoader();
   }
 
+  private filterKeydown(e: KeyboardEvent): void {
+    if (e.key === "Enter") {
+      // Search immediately instead of waiting for the debounce
+      e.preventDefault();
+      this.delayedPackagesLoader.cancel();
+      this.emitFilterChangedEvent();
+    } else if (e.key === "Escape" && this.filterQuery) {
+      e.preventDefault();
+      this.clearSearch();
+    }
+  }
+
+  private clearSearch(): void {
+    this.delayedPackagesLoader.cancel();
+    this.filterQuery = "";
+    this.emitFilterChangedEvent();
+  }
+
   private selectSource(value: string): void {
     this.selectedSourceUrl = value;
     this.emitFilterChangedEvent();
@@ -119,8 +145,7 @@ export class SearchBar extends LitElement {
   private get sortOptions(): DropdownOption[] {
     return [
       { value: "relevance", label: "Relevance" },
-      { value: "downloads", label: "Downloads" },
-      { value: "recent", label: "Recently Updated" },
+      { value: "downloads", label: "Most Downloads" },
       { value: "name-asc", label: "Name A-Z" },
     ];
   }
@@ -134,6 +159,7 @@ export class SearchBar extends LitElement {
   }
 
   setSearchQuery(query: string): void {
+    this.delayedPackagesLoader.cancel();
     this.filterQuery = query;
     const input = this.shadowRoot?.querySelector(".search-input") as HTMLInputElement;
     if (input) input.value = query;
@@ -172,11 +198,14 @@ export class SearchBar extends LitElement {
       <div class="search-bar">
         <div class="search-bar-left">
           <input
-            type="text"
+            type="search"
             class="search-input"
             placeholder="Search packages..."
             aria-label="Search packages"
+            title="Enter to search now, Escape to clear"
+            .value=${this.filterQuery}
             @input=${(e: Event) => this.filterInputEvent(e.target!)}
+            @keydown=${(e: KeyboardEvent) => this.filterKeydown(e)}
           />
           <button class="icon-btn" aria-label="Reload packages" title="Reload" @click=${() => this.reloadClicked()}>
             <span class="codicon codicon-refresh"></span>
@@ -184,6 +213,7 @@ export class SearchBar extends LitElement {
           <label class="checkbox-label">
             <input
               type="checkbox"
+              title="Include prerelease versions"
               .checked=${this.prerelease}
               @change=${(e: Event) => this.prereleaseChangedEvent(e.target!)}
             />

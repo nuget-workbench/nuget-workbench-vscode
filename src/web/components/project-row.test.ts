@@ -162,4 +162,91 @@ suite('ProjectRow Component', () => {
         assert.ok(eventDetail, 'project-updated event should have been dispatched');
         assert.strictEqual(eventDetail.isCpmEnabled, true);
     });
+
+    test('should label a lower target version as a downgrade', async () => {
+        projectRow.packageId = 'TestPackage';
+        projectRow.packageVersion = '0.9.0';
+        await projectRow.updateComplete;
+
+        const shadowRoot = projectRow.shadowRoot;
+        assert.ok(shadowRoot?.querySelector('.icon-btn .codicon-arrow-circle-down'), 'Downgrade icon should be present');
+        assert.strictEqual(shadowRoot?.querySelector('.icon-btn .codicon-arrow-circle-up'), null);
+    });
+
+    test('should match the package id case-insensitively', async () => {
+        projectRow.packageId = 'testpackage';
+        projectRow.packageVersion = '1.0.0';
+        await projectRow.updateComplete;
+
+        assert.strictEqual(projectRow.shadowRoot?.querySelector('.codicon-diff-added'), null, 'should not offer install');
+        assert.ok(projectRow.shadowRoot?.querySelector('.codicon-diff-removed'));
+    });
+
+    test('should show an error when the operation fails', async () => {
+        projectRow.packageId = 'NewPackage';
+        projectRow.packageVersion = '1.0.0';
+        await projectRow.updateComplete;
+
+        mockHostApi.updateProject = async () => ({ ok: false, error: 'dotnet exited with code 1' });
+
+        (projectRow.shadowRoot?.querySelector('.icon-btn') as HTMLElement).click();
+        await new Promise(r => setTimeout(r, 50));
+        await projectRow.updateComplete;
+
+        const error = projectRow.shadowRoot?.querySelector('.row-error');
+        assert.ok(error, 'error indicator should be shown');
+        assert.strictEqual(error?.getAttribute('title'), 'dotnet exited with code 1');
+    });
+
+    test('should not offer an update for a property or floating version', async () => {
+        projectRow.project = createMockProject('TestProject', 'path/to/project', [
+            { Id: 'TestPackage', Version: '$(TestPackageVersion)' },
+        ]);
+        projectRow.packageVersion = '2.0.0';
+        await projectRow.updateComplete;
+
+        const shadowRoot = projectRow.shadowRoot;
+        assert.strictEqual(shadowRoot?.querySelector('.codicon-arrow-circle-up'), null);
+        assert.ok(shadowRoot?.querySelector('.codicon-diff-removed'), 'uninstall stays available');
+    });
+
+    test('should apply the result to the project it was started for', async () => {
+        const projectA = createMockProject('A', 'path/to/A', []);
+        const projectB = createMockProject('B', 'path/to/B', []);
+        projectRow.project = projectA;
+        projectRow.packageId = 'Serilog';
+        projectRow.packageVersion = '3.0.0';
+        await projectRow.updateComplete;
+
+        type UpdateResult = Awaited<ReturnType<HostAPI['updateProject']>>;
+        let resolveUpdate!: (v: UpdateResult) => void;
+        mockHostApi.updateProject = () => new Promise<UpdateResult>(r => { resolveUpdate = r; });
+
+        (projectRow.shadowRoot?.querySelector('.icon-btn') as HTMLElement).click();
+        // The row is given another project while dotnet runs
+        projectRow.project = projectB;
+        resolveUpdate(ok({
+            Project: {
+                Name: 'A',
+                Path: 'path/to/A',
+                Packages: [{ Id: 'Serilog', Version: '3.0.0', IsPinned: false, VersionSource: 'project' as VersionSource }],
+                CpmEnabled: false,
+            },
+            IsCpmEnabled: false,
+        }));
+        await new Promise(r => setTimeout(r, 20));
+
+        assert.deepStrictEqual(projectA.Packages.map(p => p.Id), ['Serilog']);
+        assert.strictEqual(projectB.Packages.length, 0);
+    });
+
+    test('should not offer an update for an equivalent version', async () => {
+        projectRow.packageId = 'TestPackage';
+        projectRow.packageVersion = '1.0';
+        await projectRow.updateComplete;
+
+        const shadowRoot = projectRow.shadowRoot;
+        assert.strictEqual(shadowRoot?.querySelector('.codicon-arrow-circle-up'), null);
+        assert.strictEqual(shadowRoot?.querySelector('.codicon-arrow-circle-down'), null);
+    });
 });

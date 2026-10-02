@@ -150,6 +150,45 @@ suite('PackageVersionDecorator Tests', () => {
         assert.strictEqual(deco.renderOptions?.after?.contentText, ' (Latest: 13.0.1)');
     });
 
+    test('updateDecorations only hints at versions that are actually newer', async () => {
+        const xml = `
+<Project>
+  <ItemGroup>
+    <PackageReference Include="Same" Version="1.0" />
+    <PackageReference Include="Ahead" Version="3.0.0-preview" />
+    <PackageReference Include="Property" Version="$(PropertyVersion)" />
+    <PackageReference Include="Floating" Version="1.*" />
+  </ItemGroup>
+</Project>`;
+        mockDocument.getText.returns(xml);
+        mockDocument.positionAt.callsFake((index: number) => new vscode.Position(0, index));
+
+        const mockApi = {
+            GetPackageAsync: sandbox.stub().callsFake(async (id: string) => {
+                if (id === 'Same') return { isError: false, data: { Version: '1.0.0' } };
+                if (id === 'Ahead') return { isError: false, data: { Version: '2.0.0' } };
+                return { isError: false, data: { Version: '9.9.9' } };
+            })
+        };
+        getSourceApiStub.resolves(mockApi);
+
+        decorator = new PackageVersionDecorator();
+        await (decorator as any).updateDecorations(mockEditor);
+
+        assert.strictEqual(setDecorationsStub.firstCall.args[1].length, 0);
+        // Property and floating versions are not looked up at all
+        assert.deepStrictEqual(mockApi.GetPackageAsync.args.map((a: unknown[]) => a[0]).sort(), ['Ahead', 'Same']);
+    });
+
+    test('updateDecorations clears stale hints when nothing is left to fetch', async () => {
+        mockDocument.getText.returns(`<PackageReference Include="Pinned" Version="[1.0.0]" />`);
+
+        decorator = new PackageVersionDecorator();
+        await (decorator as any).updateDecorations(mockEditor);
+
+        assert.ok(setDecorationsStub.calledOnceWith(decorationType, []));
+    });
+
     test('updateDecorations handles API errors gracefully', async () => {
         const xml = `<PackageReference Include="Error.Package" Version="1.0.0" />`;
         mockDocument.getText.returns(xml);

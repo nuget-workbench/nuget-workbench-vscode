@@ -64,7 +64,11 @@ export default class ProjectParser {
            }
       }
 
-      const packageId = p.attributes?.getNamedItem("Include").value;
+      // <PackageReference Update="..."/> or Remove="..." items have no Include and are not installs
+      const packageId: string | undefined = p.attributes?.getNamedItem("Include")?.value;
+      if (!packageId) {
+        return;
+      }
 
       // Check for VersionOverride attribute (CPM override at project level)
       let versionOverride = p.attributes?.getNamedItem("VersionOverride")?.value;
@@ -83,7 +87,7 @@ export default class ProjectParser {
           versionSource = "override";
           Logger.debug(`ProjectParser.Parse: Package ${packageId} uses VersionOverride ${versionOverride} in ${projectPath}`);
         } else {
-          const cpmVersion = cpmVersions.get(packageId) || null;
+          const cpmVersion = cpmVersions.get(packageId) ?? findCaseInsensitive(cpmVersions, packageId);
           if (cpmVersion) {
             version = cpmVersion;
             versionSource = "central";
@@ -109,4 +113,13 @@ export default class ProjectParser {
 
     return project;
   }
+}
+
+// NuGet package ids are case-insensitive
+function findCaseInsensitive(map: Map<string, string>, key: string): string | null {
+  const lower = key.toLowerCase();
+  for (const [k, v] of map) {
+    if (k.toLowerCase() === lower) return v;
+  }
+  return null;
 }

@@ -1,5 +1,5 @@
 import { LitElement, css, html } from "lit";
-import { customElement, property, state } from "lit/decorators.js";
+import { customElement, property } from "lit/decorators.js";
 import codicon from "@/web/styles/codicon.css";
 import { scrollableBase } from "@/web/styles/base.css";
 import { ProjectViewModel } from "../types";
@@ -24,6 +24,13 @@ const styles = css`
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        flex: 1;
+      }
+
+      .header-count {
+        font-size: 11px;
+        color: var(--vscode-descriptionForeground);
+        padding-right: 4px;
       }
     }
 
@@ -64,25 +71,16 @@ export class ProjectTree extends LitElement {
   static styles = [codicon, scrollableBase, styles];
 
   @property({ type: Array }) projects: ProjectViewModel[] = [];
-  @state() selectedPaths: string[] = [];
-  @state() allChecked: boolean = true;
-  @state() isIndeterminate: boolean = false;
+  /** Controlled by the parent so the selection survives re-renders and reloads. */
+  @property({ attribute: false }) selectedPaths: string[] = [];
 
-  updated(changedProperties: Map<string, unknown>): void {
-    if (changedProperties.has("projects")) {
-      this.selectedPaths = this.projects.map((p) => p.Path);
-      this.syncCheckboxState();
-    }
-    if (changedProperties.has("selectedPaths")) {
-      this.syncCheckboxState();
-    }
+  private get allChecked(): boolean {
+    const total = this.projects.length;
+    return total > 0 && this.projects.every((p) => this.selectedPaths.includes(p.Path));
   }
 
-  private syncCheckboxState(): void {
-    const total = this.projects.length;
-    const selected = this.selectedPaths.length;
-    this.allChecked = total > 0 && selected === total;
-    this.isIndeterminate = selected > 0 && selected < total;
+  private get isIndeterminate(): boolean {
+    return this.selectedPaths.length > 0 && !this.allChecked;
   }
 
   OnSelectAllChanged(_checked: boolean): void {
@@ -126,6 +124,7 @@ export class ProjectTree extends LitElement {
               this.OnSelectAllChanged((e.target as HTMLInputElement).checked)}
           />
           <span class="header-label">All Projects</span>
+          <span class="header-count">${this.selectedPaths.length}/${this.projects.length}</span>
         </div>
         <div class="tree-list" role="list">
           ${this.projects.map(

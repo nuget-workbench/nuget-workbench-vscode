@@ -11,6 +11,7 @@ class PasswordScriptTerminal implements vscode.Pseudoterminal {
 
   private output: string = '';
   private errorOutput: string = '';
+  private proc: ReturnType<typeof spawn> | undefined;
   
   constructor(
     private scriptPath: string,
@@ -24,7 +25,8 @@ class PasswordScriptTerminal implements vscode.Pseudoterminal {
     let args: string[];
 
     if (scriptPath_lower.endsWith('.ps1')) {
-      command = 'powershell.exe';
+      // Windows PowerShell only exists on Windows; PowerShell 7 is "pwsh" everywhere else
+      command = process.platform === 'win32' ? 'powershell.exe' : 'pwsh';
       args = [
         '-NoProfile',
         '-ExecutionPolicy',
@@ -41,10 +43,14 @@ class PasswordScriptTerminal implements vscode.Pseudoterminal {
       args = [this.encodedPassword];
     }
 
+    // Relative script paths are resolved against the workspace, not the extension host's folder
     const proc = this.spawnFn(command, args, {
-      cwd: process.cwd(),
+      cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? process.cwd(),
       env: process.env,
     });
+    this.proc = proc;
+    // The terminal does not forward input: a script waiting on stdin gets EOF instead of hanging
+    proc.stdin?.end();
 
     proc.stdout.on('data', (data: Buffer) => {
       const text = data.toString();
@@ -64,11 +70,20 @@ class PasswordScriptTerminal implements vscode.Pseudoterminal {
     });
 
     proc.on('close', (code: number | null) => {
-      this.closeEmitter.fire(code ?? 0);
+      // null means the process was killed by a signal, which is not a successful run
+      this.closeEmitter.fire(code ?? 1);
     });
   }
 
   close(): void {
+    // The user closed the terminal
+    this.kill();
+  }
+
+  kill(): void {
+    if (this.proc && this.proc.exitCode === null && !this.proc.killed) {
+      this.proc.kill();
+    }
   }
 
   getOutput(): string {
@@ -84,6 +99,8 @@ export default class PasswordScriptExecutor {
   private static cache: Map<string, { password: string; timestamp: number }> = new Map();
   private static pendingExecutions: Map<string, Promise<string>> = new Map();
   private static readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  // A script that never exits would otherwise block every feed request that needs its password
+  public static TIMEOUT_MS = 2 * 60 * 1000;
 
   // START: Test Hook
   // Exposed for testing purposes to mock child_process.spawn
@@ -131,7 +148,14 @@ export default class PasswordScriptExecutor {
       });
 
       const decodedPassword = await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pty.kill();
+          terminal.dispose();
+          reject(new Error(`Script did not finish within ${Math.round(this.TIMEOUT_MS / 1000)} seconds`));
+        }, this.TIMEOUT_MS);
+
         pty.onDidClose((exitCode) => {
+          clearTimeout(timer);
           terminal.dispose();
           
           if (exitCode !== 0) {

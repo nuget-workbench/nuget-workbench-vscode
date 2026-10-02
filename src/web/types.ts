@@ -39,9 +39,15 @@ export class PackageViewModel {
     this._tags = model.Tags;
     this.Model = model;
     this.Status = status;
+    this.SourceUrl = model.SourceUrl ?? "";
   }
 
-  UpdatePackage(model: Package, sourceUrl?: string) {
+  /**
+   * Applies fetched package details. With keepVersion, a version the row already shows (the
+   * latest version from an earlier lookup) is kept; the model itself is never changed, so
+   * Model.Version stays usable for the version/dependency lookups.
+   */
+  UpdatePackage(model: Package, sourceUrl?: string, keepVersion: boolean = false) {
     this._authors = model.Authors;
     this.Id = model.Id;
     this.Name = model.Name;
@@ -51,11 +57,17 @@ export class PackageViewModel {
     this.ProjectUrl = model.ProjectUrl;
     this.TotalDownloads = model.TotalDownloads;
     this.Verified = model.Verified;
-    if (model.Version != "") this.Version = model.Version;
+    if (model.Version != "" && !(keepVersion && this.Version)) this.Version = model.Version;
     this.Versions = model.Versions?.map((x) => x.Version).reverse() ?? [];
     this._tags = model.Tags;
     this.Model = model;
     if (sourceUrl) this.SourceUrl = sourceUrl;
+    this.Revision++;
+  }
+
+  /** Marks the lookup as failed; bumps Revision so rows bound to it re-render. */
+  SetError() {
+    this.Status = "Error";
     this.Revision++;
   }
 
@@ -115,6 +127,7 @@ export class OutdatedPackageViewModel {
   SourceName: string;
   IsUpdating: boolean = false;
   Selected: boolean = false;
+  Error: string | null = null;
 
   constructor(model: OutdatedPackage) {
     this.Id = model.Id;
@@ -133,6 +146,7 @@ export class InconsistentPackageViewModel {
   CpmManaged: boolean;
   TargetVersion: string;
   IsConsolidating: boolean = false;
+  Error: string | null = null;
 
   constructor(model: InconsistentPackage) {
     this.Id = model.Id;
@@ -179,13 +193,19 @@ export class SourceViewModel {
   DraftUrl: string = "";
   DraftPasswordScriptPath: string = "";
   EditMode: boolean = false;
-  Editable: boolean = true;
+  Origin: Source["Origin"];
 
   constructor(model: Source | null = null) {
     this.Id = nonce();
     this.Name = model?.Name ?? "";
     this.Url = model?.Url ?? "";
     this.PasswordScriptPath = model?.PasswordScriptPath ?? "";
+    this.Origin = model?.Origin ?? "settings";
+  }
+
+  /** Name and URL come from nuget.config; only the password script can be set here. */
+  get FromNugetConfig(): boolean {
+    return this.Origin === "nuget.config";
   }
 
   Edit() {
@@ -207,6 +227,7 @@ export class SourceViewModel {
     const model: Source = {
       Name: this.Name,
       Url: this.Url,
+      Origin: this.Origin,
     };
     if (this.PasswordScriptPath) {
       model.PasswordScriptPath = this.PasswordScriptPath;

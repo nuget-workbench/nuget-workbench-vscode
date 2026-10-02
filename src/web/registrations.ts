@@ -7,6 +7,11 @@ import ConfigurationService from "./configuration";
 const vscode = acquireVsCodeApi();
 export const hostApi: HostAPI = createRpcClient((msg) => vscode.postMessage(msg));
 
+/** Tells the extension that the UI can handle commands (search, navigate). */
+export function notifyWebviewReady(): void {
+  vscode.postMessage({ type: "webview-ready" });
+}
+
 // Singletons
 export const router = new RouterType();
 export const configuration = new ConfigurationService(hostApi);

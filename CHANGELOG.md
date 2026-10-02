@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+- fix: Failed `dotnet` operations are reported as errors instead of success; a failing task no longer blocks all later installs
+- fix: Use `dotnet add <project> package` / `dotnet remove <project> package`, which work on every .NET SDK (the noun-first form needs .NET 10)
+- fix: Version comparison follows SemVer 2 / NuGet rules (stable > prerelease, build metadata ignored)
+- fix: Updates tab checks each project's version, so an outdated project is no longer hidden by a newer one elsewhere
+- fix: Long-running operations (updates, consolidation, scans) no longer fail after the 30 s RPC timeout
+- fix: Updates and Consolidate keep failed packages in the list and show the error instead of silently removing them
+- fix: Install/update/uninstall errors are shown on the project row
+- fix: Other tabs refresh after installing, updating or consolidating packages
+- fix: Selection highlight, stale search/detail results, and project selection resets after reloads
+- fix: Workspace `sources`/`skipRestore` settings are no longer erased when the view opens
+- fix: `PackageReference Update=` items no longer drop the whole project; CPM lookups are case-insensitive
+- fix: Credentials are stripped from logged HTTP errors
+- fix: Sort dropdown now sorts results (by downloads or name)
+- ux: Updates tab has select-all, "Update Selected (n)", per-row progress and busy states
+- ux: Downgrades are labelled as such; consolidation asks for confirmation and continues past failures
+- ux: Empty states, Retry buttons, keyboard-accessible dropdowns and links, focus/hover styles, better contrast for severity badges
+- ux: Search: Enter searches immediately, Escape clears; tab bar and search bar wrap in narrow panels
+- fix: `dotnet` runs without a shell, so project paths with `&`, `(`, `$` or quotes work and feed data cannot inject shell commands; a missing `dotnet` is reported as an error
+- fix: `NuGet.config` precedence follows NuGet: the workspace file overrides the user-level file and its `<clear/>` takes effect; encoded source names in credentials (`My_x0020_Feed`) are matched; disabled sources are not re-added from the settings
+- fix: Saving settings no longer copies the workspace's `NuGet.config` sources into the global `NugetWorkbench.sources` setting
+- fix: Confirmation dialogs no longer time out after 30 s
+- fix: Vulnerability scan ignores `$(Property)`, floating and range versions (false positives) and shows package ids with their original casing
+- fix: Search results no longer show results of an older query; the Dependencies tab works with "All sources"; duplicates across feeds and pages are removed
+- fix: Failed lookups show an error icon instead of a spinner forever; an install finishing after the project selection changed updates the right project
+- fix: Updates/Consolidate keep their busy state when the view reloads, and a double click no longer starts an update twice
+- fix: Password scripts can no longer hang the extension (stdin closed, two-minute timeout); `.ps1` runs with `pwsh` outside Windows
+- fix: CPM is also detected when `ManagePackageVersionsCentrally` is set in `Directory.Build.props` or the project; edits to `Directory.Packages.props` are picked up without a reload
+- fix: Inline version hints compare versions semantically and disappear when no longer valid
+- fix: Commands from the command palette work before the NuGet view was opened
+- fix: Basic auth supports non-Latin-1 characters and token-only credentials; a failing registration page no longer caches a truncated version list; unlisted versions are not offered as latest
+- docs: Step-by-step guide for the Marketplace token (`VSCE_PAT`), including the retirement of global PATs on December 1, 2026
+- chore(deps): non-breaking `npm audit fix` (axios, form-data, follow-redirects, lodash)
+
 ## 1.0.3 (2026-02-20)
 
 - feat: Release script with dry-run mode and changelog automation (`tools/release.mjs`)
