@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.4 (2026-10-02)
+
 - fix: Failed `dotnet` operations are reported as errors instead of success; a failing task no longer blocks all later installs
 - fix: Use `dotnet add <project> package` / `dotnet remove <project> package`, which work on every .NET SDK (the noun-first form needs .NET 10)
 - fix: Version comparison follows SemVer 2 / NuGet rules (stable > prerelease, build metadata ignored)
