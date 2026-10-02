@@ -38,4 +38,18 @@ suite('RpcClient', () => {
         const result = await promise;
         assert.strictEqual(result.ok, true);
     });
+
+    test('does not time out a confirmation dialog the user is still reading', async () => {
+        let sent: any;
+        const client = createRpcClient((msg) => { sent = msg; }, 20, 10_000);
+        const promise = client.showConfirmation({ Message: 'Update?' });
+
+        await new Promise((r) => setTimeout(r, 50));
+        dom.window.dispatchEvent(new dom.window.MessageEvent('message', {
+            data: { type: 'rpc-response', id: sent.id, result: { ok: true, value: { Confirmed: true } } },
+        }));
+
+        const result = await promise;
+        assert.deepStrictEqual(result, { ok: true, value: { Confirmed: true } });
+    });
 });

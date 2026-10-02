@@ -48,6 +48,22 @@ export function isNonConcreteVersion(version: string): boolean {
   return v.includes("$(") || v.includes("*") || v.includes(",");
 }
 
+/**
+ * Returns a canonical form for grouping equivalent versions: the brackets of an exact pin and
+ * build metadata are dropped, numeric parts are padded to three (a non-zero fourth part is kept)
+ * and prerelease labels are lowercased. "1.0", "1.0.0" and "[1.0.0]" all give "1.0.0".
+ */
+export function normalizeVersion(version: string): string {
+  const { numbers, release } = parseVersion(version);
+  const parts = [...numbers];
+  while (parts.length < 3) parts.push(0);
+  while (parts.length > 3 && parts[parts.length - 1] === 0) parts.pop();
+  const label = release
+    .map((r) => (/^\d+$/.test(r) ? String(parseInt(r, 10)) : r.toLowerCase()))
+    .join(".");
+  return parts.join(".") + (label ? `-${label}` : "");
+}
+
 function parseVersion(version: string): { numbers: number[]; release: string[] } {
   const clean = version.trim().replace(/^[[(]|[\])]$/g, "").split("+")[0];
   const dash = clean.indexOf("-");

@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { compareVersions, isNonConcreteVersion, isPrerelease, isVersionInRange } from './version';
+import { compareVersions, isNonConcreteVersion, isPrerelease, isVersionInRange, normalizeVersion } from './version';
 
 suite('version utilities', () => {
     suite('compareVersions', () => {
@@ -72,6 +72,22 @@ suite('version utilities', () => {
         test('matches exact ranges', () => {
             assert.strictEqual(isVersionInRange('1.2.3', '[1.2.3]'), true);
             assert.strictEqual(isVersionInRange('1.2.4', '[1.2.3]'), false);
+        });
+    });
+
+    suite('normalizeVersion', () => {
+        test('maps equivalent versions to the same key', () => {
+            assert.strictEqual(normalizeVersion('1.0'), '1.0.0');
+            assert.strictEqual(normalizeVersion('1.0.0'), '1.0.0');
+            assert.strictEqual(normalizeVersion('[1.0.0]'), '1.0.0');
+            assert.strictEqual(normalizeVersion('1.0.0.0'), '1.0.0');
+            assert.strictEqual(normalizeVersion('1.0.0+build.5'), '1.0.0');
+            assert.strictEqual(normalizeVersion('1.0.0-Beta.01'), '1.0.0-beta.1');
+        });
+
+        test('keeps different versions apart', () => {
+            assert.notStrictEqual(normalizeVersion('1.0.0.1'), normalizeVersion('1.0.0'));
+            assert.notStrictEqual(normalizeVersion('1.0.0-beta'), normalizeVersion('1.0.0'));
         });
     });
 });

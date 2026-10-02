@@ -31,6 +31,12 @@ suite('TaskExecutor Tests', () => {
         sandbox.restore();
     });
 
+    /** Fires onDidEndTaskProcess for the execution once ExecuteTask has subscribed. */
+    function endProcessSoon(execution: vscode.TaskExecution, exitCode: number | undefined) {
+        onDidEndTaskStub.returns({ dispose: () => {} });
+        setTimeout(() => processListeners.forEach((l) => l({ execution, exitCode })), 10);
+    }
+
     test('ExecuteTask executes a task successfully', async () => {
         const taskExecutor = new TaskExecutor();
         const task = new vscode.Task(
@@ -43,21 +49,7 @@ suite('TaskExecutor Tests', () => {
         const taskExecution = { task } as vscode.TaskExecution;
         executeTaskStub.resolves(taskExecution);
 
-        // Simulate task completion
-        onDidEndTaskStub.callsFake((callback) => {
-             // We can't immediately call the callback because ExecuteTask waits for mutex which is released IN the callback.
-             // But the callback is registered.
-             // We need to trigger it after ExecuteTask has registered it.
-             // Actually, ExecuteTask registers the callback, then waits for mutex.
-             // The callback releases the mutex.
-
-             // So we should schedule the callback invocation.
-             setTimeout(() => {
-                 callback({ execution: taskExecution });
-             }, 10);
-
-             return { dispose: sandbox.stub() };
-        });
+        endProcessSoon(taskExecution, 0);
 
         await taskExecutor.ExecuteTask(task);
 
@@ -80,12 +72,7 @@ suite('TaskExecutor Tests', () => {
         const taskExecution = { task } as vscode.TaskExecution;
         executeTaskStub.resolves(taskExecution);
 
-        onDidEndTaskStub.callsFake((callback) => {
-             setTimeout(() => {
-                 callback({ execution: taskExecution });
-             }, 10);
-             return { dispose: sandbox.stub() };
-        });
+        endProcessSoon(taskExecution, 0);
 
         await taskExecutor.ExecuteTask(task);
 
@@ -106,12 +93,7 @@ suite('TaskExecutor Tests', () => {
         const taskExecution = { task } as vscode.TaskExecution;
         executeTaskStub.resolves(taskExecution);
 
-        onDidEndTaskStub.callsFake((callback) => {
-             setTimeout(() => {
-                 callback({ execution: taskExecution });
-             }, 10);
-             return { dispose: sandbox.stub() };
-        });
+        endProcessSoon(taskExecution, 0);
 
         await taskExecutor.ExecuteTask(task);
 
@@ -132,12 +114,7 @@ suite('TaskExecutor Tests', () => {
         const taskExecution = { task } as vscode.TaskExecution;
         executeTaskStub.resolves(taskExecution);
 
-        onDidEndTaskStub.callsFake((callback) => {
-             setTimeout(() => {
-                 callback({ execution: taskExecution });
-             }, 10);
-             return { dispose: sandbox.stub() };
-        });
+        endProcessSoon(taskExecution, 0);
 
         await taskExecutor.ExecuteTask(task);
 
@@ -197,6 +174,61 @@ suite('TaskExecutor Tests', () => {
         await assert.rejects(() => taskExecutor.ExecuteTask(task), /cannot start/);
         await taskExecutor.ExecuteTask(task);
         assert.strictEqual(executeTaskStub.callCount, 2);
+    });
+
+    test('ExecuteTask rejects when the process could not be started', async () => {
+        const taskExecutor = new TaskExecutor();
+        const task = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'Missing Task', 'source');
+        const execution = { task } as vscode.TaskExecution;
+        executeTaskStub.resolves(execution);
+        endProcessSoon(execution, undefined);
+
+        await assert.rejects(() => taskExecutor.ExecuteTask(task), /could not be started/);
+    });
+
+    test('ExecuteTask rejects when only the task end event arrives', async () => {
+        const taskExecutor = new TaskExecutor();
+        const task = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'No Process Task', 'source');
+        const execution = { task } as vscode.TaskExecution;
+        executeTaskStub.resolves(execution);
+        onDidEndTaskStub.callsFake((callback) => {
+            setTimeout(() => callback({ execution }), 10);
+            return { dispose: () => {} };
+        });
+
+        await assert.rejects(() => taskExecutor.ExecuteTask(task), /could not be started/);
+    });
+
+    test('ExecuteTask ignores a late end event of the previous task with the same name', async () => {
+        const taskExecutor = new TaskExecutor();
+        const task1 = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'same', 'source');
+        const task2 = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'same', 'source');
+        const execution1 = { task: task1 } as vscode.TaskExecution;
+        const execution2 = { task: task2 } as vscode.TaskExecution;
+        let taskEndListeners: Array<(e: vscode.TaskEndEvent) => void> = [];
+        onDidEndTaskStub.callsFake((listener: any) => {
+            taskEndListeners.push(listener);
+            return { dispose: () => { taskEndListeners = taskEndListeners.filter((l) => l !== listener); } };
+        });
+
+        let task2Finished = false;
+        executeTaskStub.onFirstCall().callsFake(async () => {
+            setTimeout(() => processListeners.forEach((l) => l({ execution: execution1, exitCode: 0 })), 5);
+            return execution1;
+        });
+        executeTaskStub.onSecondCall().callsFake(async () => {
+            // Task 1's onDidEndTask arrives while task 2 is starting
+            taskEndListeners.forEach((l) => l({ execution: execution1 }));
+            setTimeout(() => {
+                task2Finished = true;
+                processListeners.forEach((l) => l({ execution: execution2, exitCode: 0 }));
+            }, 30);
+            return execution2;
+        });
+
+        await taskExecutor.ExecuteTask(task1);
+        await taskExecutor.ExecuteTask(task2);
+        assert.strictEqual(task2Finished, true, 'task 2 must wait for its own process end');
     });
 
     test('ExecuteTask does not hang when the task ends before executeTask resolves', async () => {

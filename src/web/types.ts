@@ -181,13 +181,19 @@ export class SourceViewModel {
   DraftUrl: string = "";
   DraftPasswordScriptPath: string = "";
   EditMode: boolean = false;
-  Editable: boolean = true;
+  Origin: Source["Origin"];
 
   constructor(model: Source | null = null) {
     this.Id = nonce();
     this.Name = model?.Name ?? "";
     this.Url = model?.Url ?? "";
     this.PasswordScriptPath = model?.PasswordScriptPath ?? "";
+    this.Origin = model?.Origin ?? "settings";
+  }
+
+  /** Name and URL come from nuget.config; only the password script can be set here. */
+  get FromNugetConfig(): boolean {
+    return this.Origin === "nuget.config";
   }
 
   Edit() {
@@ -209,6 +215,7 @@ export class SourceViewModel {
     const model: Source = {
       Name: this.Name,
       Url: this.Url,
+      Origin: this.Origin,
     };
     if (this.PasswordScriptPath) {
       model.PasswordScriptPath = this.PasswordScriptPath;

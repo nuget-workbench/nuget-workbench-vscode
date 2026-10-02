@@ -286,20 +286,20 @@ suite('NuGetConfigResolver Tests', () => {
             assert.strictEqual(source1?.Password, 'pass');
         });
 
-        test('Clears sources when <clear /> is present', async () => {
-            // Setup User config with Source1
-            if (os.homedir() === homeDir) {
-                writeConfig(homeDir, '.nuget/NuGet/NuGet.Config', `
-                    <configuration>
-                        <packageSources>
-                            <add key="Source1" value="http://source1" />
-                        </packageSources>
-                    </configuration>
-                `);
-            }
+        // Config files in priority order (workspace first), independent of the real home directory
+        function useConfigFiles(...files: string[]) {
+            sandbox.stub(NuGetConfigResolver as any, 'FindAllConfigFiles').returns(files);
+        }
 
-            // Setup Workspace config with clear and Source2
-            writeConfig(workspaceDir, 'nuget.config', `
+        test('Clears sources when <clear /> is present', async () => {
+            const userConfig = writeConfig(homeDir, '.nuget/NuGet/NuGet.Config', `
+                <configuration>
+                    <packageSources>
+                        <add key="Source1" value="http://source1" />
+                    </packageSources>
+                </configuration>
+            `);
+            const workspaceConfig = writeConfig(workspaceDir, 'nuget.config', `
                 <configuration>
                     <packageSources>
                         <clear />
@@ -307,19 +307,114 @@ suite('NuGetConfigResolver Tests', () => {
                     </packageSources>
                 </configuration>
             `);
+            useConfigFiles(workspaceConfig, userConfig);
 
             const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
 
-            const source2 = sources.find(s => s.Name === 'Source2');
-            assert.ok(source2);
+            // The workspace <clear/> drops the sources inherited from the user config
+            assert.deepStrictEqual(sources.map(s => s.Name), ['Source2']);
+            const blocked = await NuGetConfigResolver.GetBlockedSourceNames(workspaceDir);
+            assert.ok(blocked.has('source1'));
+        });
 
-            if (os.homedir() === homeDir) {
-                // If we successfully set up user config, check that it leaked through (due to implementation order)
-                // or if it was cleared (if implementation was different).
-                // Based on previous run, it leaks.
-                const source1 = sources.find(s => s.Name === 'Source1');
-                assert.ok(source1);
-            }
+        test('Workspace config overrides the user config for the same key', async () => {
+            const userConfig = writeConfig(homeDir, '.nuget/NuGet/NuGet.Config', `
+                <configuration>
+                    <packageSources>
+                        <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+                        <add key="UserFeed" value="http://user-feed" />
+                    </packageSources>
+                    <packageSourceCredentials>
+                        <UserFeed>
+                            <add key="Username" value="user-from-profile" />
+                            <add key="ClearTextPassword" value="old" />
+                        </UserFeed>
+                    </packageSourceCredentials>
+                </configuration>
+            `);
+            const workspaceConfig = writeConfig(workspaceDir, 'nuget.config', `
+                <configuration>
+                    <packageSources>
+                        <add key="Mirror" value="http://mirror" />
+                        <add key="NuGet.org" value="http://internal-mirror/nuget" />
+                    </packageSources>
+                    <packageSourceCredentials>
+                        <UserFeed>
+                            <add key="Username" value="user-from-repo" />
+                            <add key="ClearTextPassword" value="new" />
+                        </UserFeed>
+                    </packageSourceCredentials>
+                </configuration>
+            `);
+            useConfigFiles(workspaceConfig, userConfig);
+
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+
+            assert.deepStrictEqual(
+                sources.map(s => `${s.Name}=${s.Url}`),
+                ['Mirror=http://mirror', 'NuGet.org=http://internal-mirror/nuget', 'UserFeed=http://user-feed']
+            );
+            assert.strictEqual(sources[2].Username, 'user-from-repo');
+            assert.strictEqual(sources[2].Password, 'new');
+        });
+
+        test('A <clear/> in the user config does not remove workspace sources', async () => {
+            const userConfig = writeConfig(homeDir, '.nuget/NuGet/NuGet.Config', `
+                <configuration>
+                    <packageSources>
+                        <clear />
+                        <add key="UserFeed" value="http://user-feed" />
+                    </packageSources>
+                </configuration>
+            `);
+            const workspaceConfig = writeConfig(workspaceDir, 'nuget.config', `
+                <configuration>
+                    <packageSources>
+                        <add key="WorkspaceFeed" value="http://workspace-feed" />
+                    </packageSources>
+                </configuration>
+            `);
+            useConfigFiles(workspaceConfig, userConfig);
+
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+            assert.deepStrictEqual(sources.map(s => s.Name), ['WorkspaceFeed', 'UserFeed']);
+        });
+
+        test('Decodes encoded source names in packageSourceCredentials', async () => {
+            writeConfig(workspaceDir, 'nuget.config', `
+                <configuration>
+                    <packageSources>
+                        <add key="My Feed" value="http://my-feed" />
+                    </packageSources>
+                    <packageSourceCredentials>
+                        <my_x0020_feed>
+                            <add key="Username" value="user" />
+                            <add key="ClearTextPassword" value="token" />
+                        </my_x0020_feed>
+                    </packageSourceCredentials>
+                </configuration>
+            `);
+
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+            const source = sources.find(s => s.Name === 'My Feed');
+            assert.strictEqual(source?.Username, 'user');
+            assert.strictEqual(source?.Password, 'token');
+        });
+
+        test('Ignores entries above a <clear/> in the same file', async () => {
+            writeConfig(workspaceDir, 'nuget.config', `
+                <configuration>
+                    <packageSources>
+                        <add key="Before" value="http://before" />
+                        <clear />
+                        <add key="After" value="http://after" />
+                    </packageSources>
+                </configuration>
+            `);
+
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+            assert.strictEqual(sources.find(s => s.Name === 'Before'), undefined);
+            assert.ok(sources.find(s => s.Name === 'After'));
         });
 
         test('Handles parsing errors gracefully', async () => {
@@ -401,6 +496,58 @@ suite('NuGetConfigResolver Tests', () => {
             assert.ok((Logger.error as sinon.SinonStub).called);
              // Should cache original credential?
             assert.ok(credentialsCacheSetStub.calledWith('SecureSource', undefined, 'Encrypted'));
+        });
+
+        test('Tags sources with their origin', async () => {
+            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([{ Name: 'ConfigFeed', Url: 'http://config' }]);
+            vscodeGetConfigurationStub.returns({
+                get: (key: string) => key === 'sources'
+                    ? [JSON.stringify({ name: 'SettingsFeed', url: 'http://settings' })]
+                    : undefined
+            });
+
+            const sources = await NuGetConfigResolver.GetSources(workspaceDir, false);
+
+            assert.deepStrictEqual(sources.map(s => `${s.Name}:${s.Origin}`), ['ConfigFeed:nuget.config', 'SettingsFeed:settings']);
+        });
+
+        test('Does not bring back a source that nuget.config disables', async () => {
+            writeConfig(workspaceDir, 'nuget.config', `
+                <configuration>
+                    <packageSources>
+                        <add key="Internal" value="http://internal" />
+                    </packageSources>
+                    <disabledPackageSources>
+                        <add key="nuget.org" value="true" />
+                    </disabledPackageSources>
+                </configuration>
+            `);
+            vscodeGetConfigurationStub.returns({
+                get: (key: string) => key === 'sources'
+                    ? [JSON.stringify({ name: 'nuget.org', url: 'https://api.nuget.org/v3/index.json' })]
+                    : undefined
+            });
+
+            const sources = await NuGetConfigResolver.GetSources(workspaceDir, false);
+
+            assert.strictEqual(sources.find(s => s.Name === 'nuget.org'), undefined);
+            assert.ok(sources.find(s => s.Name === 'Internal'));
+        });
+
+        test('Does not run password scripts when decoding is not requested', async () => {
+            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([
+                { Name: 'SecureSource', Url: 'http://secure', Password: 'Encrypted' }
+            ]);
+            vscodeGetConfigurationStub.returns({
+                get: (key: string) => key === 'sources'
+                    ? [JSON.stringify({ name: 'SecureSource', passwordScriptPath: '/path/to/script.sh' })]
+                    : undefined
+            });
+
+            const sources = await NuGetConfigResolver.GetSources(workspaceDir, false);
+
+            assert.ok(executeScriptStub.notCalled);
+            assert.strictEqual(sources[0].PasswordScriptPath, '/path/to/script.sh');
         });
 
         test('Caches credentials even without script', async () => {

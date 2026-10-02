@@ -8,11 +8,13 @@ type PendingCall = {
 };
 
 /**
- * Methods that run dotnet CLI tasks or scan every package of the workspace.
- * They can legitimately take minutes, so the default timeout would report a
- * failure while the host is still working (and invite a duplicate retry).
+ * Methods that run dotnet CLI tasks, scan every package of the workspace or wait
+ * for the user to answer a modal dialog. They can legitimately take minutes, so
+ * the default timeout would report a failure while the host is still working
+ * (and invite a duplicate retry) or drop the user's late "Yes".
  */
 const LONG_RUNNING_METHODS: ReadonlySet<string> = new Set<keyof HostAPI>([
+  "showConfirmation",
   "updateProject",
   "batchUpdatePackages",
   "consolidatePackages",

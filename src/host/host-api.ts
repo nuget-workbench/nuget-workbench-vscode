@@ -34,10 +34,11 @@ import CpmResolver from "./utilities/cpm-resolver";
 import nugetApiFactory from "./nuget/api-factory";
 import NuGetConfigResolver from "./utilities/nuget-config-resolver";
 import TaskExecutor from "./utilities/task-executor";
+import { buildSourcesSetting } from "./utilities/sources-setting";
 import StatusBarUtils from "./utilities/status-bar-utils";
 import { Logger } from "../common/logger";
 import { AxiosError } from "axios";
-import { compareVersions, isNonConcreteVersion, isVersionInRange } from "../common/version";
+import { compareVersions, isNonConcreteVersion, isVersionInRange, normalizeVersion } from "../common/version";
 
 function extractResponseDetail(data: unknown): string {
   if (!data) return "";
@@ -138,6 +139,7 @@ export function createHostAPI(): HostAPI {
             }
           } else {
             let completed = 0;
+            const errors: unknown[] = [];
             const promises = sources.map(async (source) => {
               try {
                 const api = await nugetApiFactory.GetSourceApi(source.Url);
@@ -149,6 +151,7 @@ export function createHostAPI(): HostAPI {
                 );
               } catch (error) {
                 Logger.error(`getPackages: Failed to fetch from ${source.Url}`, error);
+                errors.push(error);
                 return { data: [] };
               } finally {
                 completed++;
@@ -157,13 +160,19 @@ export function createHostAPI(): HostAPI {
             });
 
             const results = await Promise.all(promises);
+            if (sources.length > 0 && errors.length === sources.length) {
+              return fail(formatApiError(errors[0]));
+            }
+
             const allPackages: Package[] = [];
             const seenIds = new Set<string>();
 
             for (const result of results) {
               for (const pkg of result.data) {
-                if (!seenIds.has(pkg.Id)) {
-                  seenIds.add(pkg.Id);
+                // Package.Id is the feed-specific registration URL; Name is the NuGet package id
+                const key = (pkg.Name || pkg.Id).toLowerCase();
+                if (!seenIds.has(key)) {
+                  seenIds.add(key);
                   allPackages.push(pkg);
                 }
               }
@@ -231,9 +240,8 @@ export function createHostAPI(): HostAPI {
         Logger.info(`getPackage: Successfully fetched ${request.Id}`);
         return ok({ Package: packageResult.data, SourceUrl: request.Url });
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
         Logger.error(`getPackage: Exception for ${request.Id}`, err);
-        return fail(`Failed to fetch package: ${message}`);
+        return fail(`Failed to fetch package: ${formatApiError(err)}`);
       }
     },
 
@@ -246,9 +254,8 @@ export function createHostAPI(): HostAPI {
         const details = await api.GetPackageDetailsAsync(request.PackageVersionUrl);
         return ok({ Package: details.data });
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
         Logger.error(`getPackageDetails: Failed for ${request.PackageVersionUrl}`, err);
-        return fail(`Failed to fetch package details: ${message}`);
+        return fail(`Failed to fetch package details: ${formatApiError(err)}`);
       }
     },
 
@@ -271,15 +278,19 @@ export function createHostAPI(): HostAPI {
         return fail(`Failed to ${request.Type.toLowerCase()} package: ${message}`);
       } finally {
         StatusBarUtils.hide();
+        // dotnet may have changed the project or Directory.Packages.props even when it failed
+        CpmResolver.ClearCache();
+        nugetApiFactory.ClearCache();
       }
 
-      CpmResolver.ClearCache();
-      nugetApiFactory.ClearCache();
-
-      const cpmVersions = await CpmResolver.GetPackageVersions(request.ProjectPath);
-      const updatedProject = await ProjectParser.Parse(request.ProjectPath, cpmVersions);
-
-      return ok({ Project: updatedProject, IsCpmEnabled: isCpmEnabled });
+      try {
+        const cpmVersions = await CpmResolver.GetPackageVersions(request.ProjectPath);
+        const updatedProject = await ProjectParser.Parse(request.ProjectPath, cpmVersions);
+        return ok({ Project: updatedProject, IsCpmEnabled: isCpmEnabled });
+      } catch (err) {
+        Logger.error(`updateProject: Failed to reload ${request.ProjectPath}`, err);
+        return fail(`The package operation succeeded, but the project could not be reloaded: ${formatApiError(err)}`);
+      }
     },
 
     async getConfiguration(): Promise<Result<GetConfigurationResponse>> {
@@ -287,30 +298,15 @@ export function createHostAPI(): HostAPI {
       const config = vscode.workspace.getConfiguration("NugetWorkbench");
 
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      const sourcesWithCreds = await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot);
+      // Only names and URLs are needed here; running password scripts would delay the UI start
+      const resolved = await NuGetConfigResolver.GetSources(workspaceRoot, false);
 
-      const sources: Source[] = sourcesWithCreds.map((s) => ({
+      const sources: Source[] = resolved.map((s) => ({
         Name: s.Name,
         Url: s.Url,
+        ...(s.PasswordScriptPath && { PasswordScriptPath: s.PasswordScriptPath }),
+        Origin: s.Origin ?? "settings",
       }));
-
-      const vscodeSourcesRaw = config.get<string[]>("sources") ?? [];
-      for (const rawSourceConfig of vscodeSourcesRaw) {
-        try {
-          const parsed = JSON.parse(rawSourceConfig) as {
-            name?: string;
-            passwordScriptPath?: string;
-          };
-          if (parsed.name && parsed.passwordScriptPath) {
-            const source = sources.find((s) => s.Name === parsed.name);
-            if (source) {
-              source.PasswordScriptPath = parsed.passwordScriptPath;
-            }
-          }
-        } catch (e) {
-          Logger.warn(`getConfiguration: Failed to parse source config: ${rawSourceConfig}`, e);
-        }
-      }
 
       return ok({
         Configuration: {
@@ -326,13 +322,12 @@ export function createHostAPI(): HostAPI {
     async updateConfiguration(request: UpdateConfigurationRequest): Promise<Result<void>> {
       Logger.info("updateConfiguration: Updating configuration");
       const config = vscode.workspace.getConfiguration("NugetWorkbench");
+      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
-      const sources = request.Configuration.Sources.map((x) =>
-        JSON.stringify({
-          name: x.Name,
-          url: x.Url,
-          ...(x.PasswordScriptPath && { passwordScriptPath: x.PasswordScriptPath }),
-        })
+      const sources = buildSourcesSetting(
+        request.Configuration.Sources,
+        config.get<string[]>("sources") ?? [],
+        await NuGetConfigResolver.GetBlockedSourceNames(workspaceRoot)
       );
 
       await config.update("skipRestore", request.Configuration.SkipRestore, vscode.ConfigurationTarget.Global);
@@ -346,7 +341,17 @@ export function createHostAPI(): HostAPI {
 
     async openUrl(request: OpenUrlRequest): Promise<Result<void>> {
       Logger.info(`openUrl: Opening ${request.Url}`);
-      vscode.env.openExternal(vscode.Uri.parse(request.Url));
+      // URLs come from feed metadata (project/license URLs); only open web links
+      let uri: vscode.Uri;
+      try {
+        uri = vscode.Uri.parse(request.Url, true);
+      } catch {
+        return fail(`Invalid URL: ${request.Url}`);
+      }
+      if (uri.scheme !== "http" && uri.scheme !== "https") {
+        return fail(`Only http(s) links can be opened: ${request.Url}`);
+      }
+      await vscode.env.openExternal(uri);
       return ok(undefined as void);
     },
 
@@ -423,6 +428,8 @@ export function createHostAPI(): HostAPI {
         const outdated: OutdatedPackage[] = [];
         const packageIds = Array.from(installedMap.keys());
         const batchSize = 5;
+        const lookupErrors: unknown[] = [];
+        let anyLookupSucceeded = false;
 
         for (let i = 0; i < packageIds.length; i += batchSize) {
           const batch = packageIds.slice(i, i + batchSize);
@@ -431,7 +438,9 @@ export function createHostAPI(): HostAPI {
 
           const promises = batch.map(async (key) => {
             const installed = installedMap.get(key)!;
-            const latest = await getLatestVersion(installed.id, request.Prerelease, sources);
+            const { latest, errors } = await getLatestVersion(installed.id, request.Prerelease, sources);
+            if (errors.length < sources.length) anyLookupSucceeded = true;
+            lookupErrors.push(...errors);
             if (!latest) return;
 
             // Only projects that are actually behind the latest version are outdated
@@ -455,6 +464,11 @@ export function createHostAPI(): HostAPI {
           });
 
           await Promise.allSettled(promises);
+        }
+
+        // Every lookup failed (offline, 401, ...): do not report "all packages up to date"
+        if (packageIds.length > 0 && !anyLookupSucceeded && lookupErrors.length > 0) {
+          return fail(`Failed to check for updates: ${formatApiError(lookupErrors[0])}`);
         }
 
         outdated.sort((a, b) => a.Id.localeCompare(b.Id));
@@ -529,7 +543,8 @@ export function createHostAPI(): HostAPI {
           }
         }
 
-        const packageMap = new Map<string, Map<string, Array<{ Name: string; Path: string }>>>();
+        // Versions are grouped by their normalized form, so "1.0", "1.0.0" and "[1.0.0]" are not inconsistent
+        const packageMap = new Map<string, Map<string, { Version: string; Projects: Array<{ Name: string; Path: string }> }>>();
         const packageNames = new Map<string, string>();
         const cpmPackages = new Set<string>();
 
@@ -545,10 +560,11 @@ export function createHostAPI(): HostAPI {
             // A CPM project can still contain plain Version= references; only count centrally managed ones
             if (pkg.VersionSource !== "project") cpmPackages.add(key);
             const versionMap = packageMap.get(key)!;
-            if (!versionMap.has(pkg.Version)) {
-              versionMap.set(pkg.Version, []);
+            const versionKey = normalizeVersion(pkg.Version);
+            if (!versionMap.has(versionKey)) {
+              versionMap.set(versionKey, { Version: pkg.Version, Projects: [] });
             }
-            versionMap.get(pkg.Version)!.push({ Name: project.Name, Path: project.Path });
+            versionMap.get(versionKey)!.Projects.push({ Name: project.Name, Path: project.Path });
           }
         }
 
@@ -558,9 +574,9 @@ export function createHostAPI(): HostAPI {
           if (versionMap.size <= 1) continue;
           const packageId = packageNames.get(key) ?? key;
 
-          const versions = Array.from(versionMap.entries())
-            .map(([version, projects]) => ({ Version: version, Projects: projects }))
-            .sort((a, b) => compareVersions(b.Version, a.Version));
+          const versions = Array.from(versionMap.values()).sort((a, b) =>
+            compareVersions(b.Version, a.Version)
+          );
 
           inconsistent.push({
             Id: packageId,
@@ -615,18 +631,20 @@ export function createHostAPI(): HostAPI {
         // Collect all installed packages with their projects
         const installedMap = new Map<
           string,
-          { version: string; projects: Array<{ Name: string; Path: string }> }
+          { id: string; version: string; projects: Array<{ Name: string; Path: string }> }
         >();
 
         for (const project of projects) {
           for (const pkg of project.Packages) {
-            if (!pkg.Version) continue;
-            const key = `${pkg.Id.toLowerCase()}::${pkg.Version}`;
+            // "$(Prop)", "1.*" and ranges would be read as 0.0.0 / the lower bound and give false positives
+            if (!pkg.Version || isNonConcreteVersion(pkg.Version)) continue;
+            const key = `${pkg.Id.toLowerCase()}::${normalizeVersion(pkg.Version)}`;
             const existing = installedMap.get(key);
             if (existing) {
               existing.projects.push({ Name: project.Name, Path: project.Path });
             } else {
               installedMap.set(key, {
+                id: pkg.Id,
                 version: pkg.Version,
                 projects: [{ Name: project.Name, Path: project.Path }],
               });
@@ -644,9 +662,10 @@ export function createHostAPI(): HostAPI {
             const api = await nugetApiFactory.GetSourceApi(source.Url);
             const vulns = await api.GetVulnerabilitiesAsync();
             for (const [packageId, entries] of vulns) {
-              const existing = allVulnerabilities.get(packageId) ?? [];
+              const vulnKey = packageId.toLowerCase();
+              const existing = allVulnerabilities.get(vulnKey) ?? [];
               existing.push(...entries);
-              allVulnerabilities.set(packageId, existing);
+              allVulnerabilities.set(vulnKey, existing);
             }
           } catch (e) {
             Logger.warn(`getVulnerablePackages: Failed to fetch vulns from ${source.Url}`, e);
@@ -662,9 +681,8 @@ export function createHostAPI(): HostAPI {
 
         const vulnerable: VulnerablePackage[] = [];
 
-        for (const [key, installed] of installedMap) {
-          const packageId = key.split("::")[0];
-          const vulnEntries = allVulnerabilities.get(packageId);
+        for (const installed of installedMap.values()) {
+          const vulnEntries = allVulnerabilities.get(installed.id.toLowerCase());
           if (!vulnEntries) continue;
 
           // Find the highest-severity matching vulnerability
@@ -680,7 +698,7 @@ export function createHostAPI(): HostAPI {
 
           if (worstMatch) {
             vulnerable.push({
-              Id: packageId,
+              Id: installed.id,
               InstalledVersion: installed.version,
               Severity: worstMatch.severity,
               AdvisoryUrl: worstMatch.url,
@@ -732,15 +750,16 @@ export function createHostAPI(): HostAPI {
           await executeAddPackage(request.PackageId, projectPath, request.TargetVersion, skipRestore);
         }
 
-        CpmResolver.ClearCache();
-        StatusBarUtils.hide();
         Logger.info(`consolidatePackages: Done`);
         return ok(undefined as void);
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         Logger.error(`consolidatePackages: Failed`, err);
-        StatusBarUtils.hide();
         return fail(`Failed to consolidate: ${message}`);
+      } finally {
+        // Projects before the failing one were already changed
+        CpmResolver.ClearCache();
+        StatusBarUtils.hide();
       }
     },
   };
@@ -752,14 +771,16 @@ export function createHostAPI(): HostAPI {
 
 async function executeRemovePackage(packageId: string, projectPath: string): Promise<void> {
   StatusBarUtils.ShowText(`Removing package ${packageId}...`);
-  const args = ["remove", projectPath.replace(/\\/g, "/"), "package", packageId];
+  const args = ["remove", projectPath, "package", packageId];
 
   const task = new vscode.Task(
     { type: "dotnet", task: "dotnet remove package" },
     vscode.TaskScope.Workspace,
     "nuget-workbench",
     "dotnet",
-    new vscode.ShellExecution("dotnet", args)
+    // ProcessExecution runs dotnet without a shell, so paths with "&", "(", "$" or quotes
+    // and values from the feed are passed verbatim instead of being interpreted by the shell
+    new vscode.ProcessExecution("dotnet", args)
   );
   task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
   await TaskExecutor.ExecuteTask(task);
@@ -773,7 +794,7 @@ async function executeAddPackage(
   sourceUrl?: string
 ): Promise<void> {
   StatusBarUtils.ShowText(`Installing package ${packageId} ${version || "latest"}...`);
-  const args = ["add", projectPath.replace(/\\/g, "/"), "package", packageId];
+  const args = ["add", projectPath, "package", packageId];
 
   if (version) {
     args.push("--version", version);
@@ -790,7 +811,7 @@ async function executeAddPackage(
     vscode.TaskScope.Workspace,
     "nuget-workbench",
     "dotnet",
-    new vscode.ShellExecution("dotnet", args)
+    new vscode.ProcessExecution("dotnet", args)
   );
   task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
   await TaskExecutor.ExecuteTask(task);
@@ -800,8 +821,9 @@ async function getLatestVersion(
   packageId: string,
   prerelease: boolean,
   sources: Array<{ Name: string; Url: string }>
-): Promise<{ version: string; sourceUrl: string; sourceName: string } | null> {
+): Promise<{ latest: { version: string; sourceUrl: string; sourceName: string } | null; errors: unknown[] }> {
   let best: { version: string; sourceUrl: string; sourceName: string } | null = null;
+  const errors: unknown[] = [];
 
   const promises = sources.map(async (source) => {
     try {
@@ -813,12 +835,16 @@ async function getLatestVersion(
         return { version: pkg.Version, sourceUrl: source.Url, sourceName: source.Name };
       }
       // Fall back to the registration endpoint when search ranking hides the exact match
-      const registration = await api.GetPackageAsync(packageId, prerelease);
-      if (registration.data?.Version) {
-        return { version: registration.data.Version, sourceUrl: source.Url, sourceName: source.Name };
+      try {
+        const registration = await api.GetPackageAsync(packageId, prerelease);
+        if (registration.data?.Version) {
+          return { version: registration.data.Version, sourceUrl: source.Url, sourceName: source.Name };
+        }
+      } catch {
+        // The feed answered the search but does not know the package
       }
-    } catch {
-      // Ignore feed errors
+    } catch (err) {
+      errors.push(err);
     }
     return null;
   });
@@ -833,5 +859,5 @@ async function getLatestVersion(
     }
   }
 
-  return best;
+  return { latest: best, errors };
 }

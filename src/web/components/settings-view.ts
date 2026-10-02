@@ -65,15 +65,15 @@ export class SettingsView extends LitElement {
                     gap: 2px;
                     opacity: 0;
                   }
-                  &:first-child .actions {
-                    /* The default nuget.org source cannot be edited or removed */
-                    display: none;
-                  }
                   .label {
                     padding: 4px 2px;
                     text-wrap: nowrap;
                     overflow: hidden;
                     text-overflow: ellipsis;
+                  }
+                  .origin {
+                    opacity: 0.7;
+                    font-size: 11px;
                   }
                   &:hover,
                   &:focus-within {
@@ -148,6 +148,10 @@ export class SettingsView extends LitElement {
         width: 100%;
         box-sizing: border-box;
       }
+
+      input[type="text"]:disabled {
+        opacity: 0.6;
+      }
     `,
   ];
 
@@ -171,7 +175,8 @@ export class SettingsView extends LitElement {
         SkipRestore: this.skipRestore,
         EnablePackageVersionInlineInfo: this.enablePackageVersionInlineInfo,
         Prerelease: configuration.Configuration?.Prerelease ?? false,
-        Sources: this.sources.map((x) => x.GetModel()),
+        // A row that is still being added has no saved name/URL yet
+        Sources: this.sources.filter((x) => x.Name && x.Url).map((x) => x.GetModel()),
         StatusBarLoadingIndicator:
           configuration.Configuration?.StatusBarLoadingIndicator ?? false,
       },
@@ -179,15 +184,20 @@ export class SettingsView extends LitElement {
     await configuration.Reload();
   }
 
+  /** Closes other open editors; an unsaved new row is discarded instead of becoming an empty source. */
+  private cancelOpenEditors(): void {
+    this.sources.filter((x) => x.EditMode).forEach((x) => this.cancelRow(x));
+  }
+
   private addSourceRow(): void {
-    this.sources.filter((x) => x.EditMode).forEach((x) => x.Cancel());
+    this.cancelOpenEditors();
     this.newSource = new SourceViewModel();
     this.newSource.Edit();
     this.sources = [...this.sources, this.newSource];
   }
 
   private editRow(source: SourceViewModel): void {
-    this.sources.filter((x) => x.EditMode).forEach((x) => x.Cancel());
+    this.cancelOpenEditors();
     source.Edit();
     this.requestUpdate();
   }
@@ -224,10 +234,12 @@ export class SettingsView extends LitElement {
       return;
     }
 
-    if (name === "" || !/^(https?:\/\/|[a-zA-Z]:[\\/]|\/|\.{1,2}[\\/])/.test(url)) {
-      this.validationError =
-        name === "" ? "Enter a name for the source." : "Enter an http(s) URL or a local folder path.";
-      return;
+    if (!source.FromNugetConfig) {
+      const error = this.validateSource(source, name, url);
+      if (error) {
+        this.validationError = error;
+        return;
+      }
     }
 
     this.validationError = "";
@@ -237,6 +249,20 @@ export class SettingsView extends LitElement {
     source.Save();
     this.requestUpdate();
     this.updateConfiguration();
+  }
+
+  private validateSource(source: SourceViewModel, name: string, url: string): string {
+    if (name === "") return "Enter a name for the source.";
+    // http(s) URL, drive path, UNC path, absolute or relative local folder
+    if (!/^(https?:\/\/|[a-zA-Z]:[\\/]|\\\\|\/|\.{1,2}[\\/])/.test(url)) {
+      return "Enter an http(s) URL or a local folder path.";
+    }
+    // Sources are identified by name, so a second source with the same name would be ignored
+    const duplicate = this.sources.some(
+      (s) => s !== source && s.Name.toLowerCase() === name.toLowerCase()
+    );
+    if (duplicate) return `A source named "${name}" already exists.`;
+    return "";
   }
 
   private cancelRow(source: SourceViewModel): void {
@@ -258,6 +284,8 @@ export class SettingsView extends LitElement {
             type="text"
             placeholder="Name"
             aria-label="Source name"
+            title=${source.FromNugetConfig ? "Defined in nuget.config" : ""}
+            ?disabled=${source.FromNugetConfig}
             .value=${source.DraftName}
             @input=${(e: Event) => {
               source.DraftName = (e.target as HTMLInputElement).value;
@@ -267,6 +295,8 @@ export class SettingsView extends LitElement {
             type="text"
             placeholder="Url"
             aria-label="Source URL"
+            title=${source.FromNugetConfig ? "Defined in nuget.config" : ""}
+            ?disabled=${source.FromNugetConfig}
             .value=${source.DraftUrl}
             @input=${(e: Event) => {
               source.DraftUrl = (e.target as HTMLInputElement).value;
@@ -294,16 +324,25 @@ export class SettingsView extends LitElement {
 
     return html`
       <div class="row data-row">
-        <span class="label" title=${source.Name}>${source.Name}</span>
+        <span class="label" title=${source.FromNugetConfig ? `${source.Name} (defined in nuget.config)` : source.Name}
+          >${source.Name}${source.FromNugetConfig ? html` <span class="origin">nuget.config</span>` : nothing}</span
+        >
         <span class="label" title=${source.Url}>${source.Url}</span>
         <span class="label" title=${source.PasswordScriptPath ?? ""}>${source.PasswordScriptPath}</span>
         <div class="actions">
-          <button class="icon-btn" aria-label="Edit source ${source.Name}" title="Edit" @click=${() => this.editRow(source)}>
+          <button
+            class="icon-btn"
+            aria-label=${source.FromNugetConfig ? `Set password script for ${source.Name}` : `Edit source ${source.Name}`}
+            title=${source.FromNugetConfig ? "Set password script" : "Edit"}
+            @click=${() => this.editRow(source)}
+          >
             <span class="codicon codicon-edit"></span>
           </button>
-          <button class="icon-btn" aria-label="Remove source ${source.Name}" title="Remove" @click=${() => this.removeRow(source)}>
-            <span class="codicon codicon-close"></span>
-          </button>
+          ${source.FromNugetConfig
+            ? nothing
+            : html`<button class="icon-btn" aria-label="Remove source ${source.Name}" title="Remove" @click=${() => this.removeRow(source)}>
+                <span class="codicon codicon-close"></span>
+              </button>`}
         </div>
       </div>
     `;

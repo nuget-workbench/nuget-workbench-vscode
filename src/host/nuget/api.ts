@@ -35,9 +35,11 @@ export default class NuGetApi {
     this.http = axios.create({
       proxy: this.getProxy(),
     });
-    // Add Basic Auth if credentials are provided
-    if (this._username && this._password) {
-      const token = btoa(`${this._username}:${this._password}`);
+    // Add Basic Auth if credentials are provided. A token-only credential (e.g. an Azure DevOps
+    // PAT without a user name) is valid Basic auth with an empty user name.
+    if (this._password) {
+      // btoa() throws for characters above U+00FF and encodes others as Latin-1
+      const token = Buffer.from(`${this._username ?? ""}:${this._password}`, "utf8").toString("base64");
       this.http.interceptors.request.use((config) => {
         config.headers["Authorization"] = `Basic ${token}`;
         return config;
@@ -98,36 +100,36 @@ export default class NuGetApi {
     Logger.debug(`NuGetApi.GetPackageAsync: Fetching package info for ${id} (prerelease: ${prerelease})`);
     await this.EnsureSearchUrl();
     const url = new URL([id.toLowerCase(), "index.json"].join("/"), this._packageInfoUrl).href;
-    const items: Array<any> = [];
+    const allItems: Array<any> = [];
+    Logger.debug(`NuGetApi.GetPackageAsync: GET ${url}`);
+    let result: AxiosResponse;
     try {
-      Logger.debug(`NuGetApi.GetPackageAsync: GET ${url}`);
-      const result = await this.http.get(url);
-      if (result instanceof AxiosError) {
-        Logger.error("NuGetApi.GetPackageAsync: Axios Error Data:", result.response?.data);
-        return {
-          isError: true,
-          errorMessage: "Package couldn't be found",
-          data: undefined,
-        };
-      }
-
-      for (let i = 0; i < result.data.count; i++) {
-        const page = result.data.items[i];
-        if (page.items) items.push(...page.items);
-        else {
-          const pageData = await this.http.get(page["@id"]);
-          if (pageData instanceof AxiosError) {
-            Logger.error("NuGetApi.GetPackageAsync: Axios Error while loading page data:", pageData.message);
-          } else {
-            items.push(...pageData.data.items);
-          }
-        }
-      }
+      result = await this.http.get(url);
     } catch (err) {
       Logger.error(`NuGetApi.GetPackageAsync: ERROR url: ${url}`, err);
+      // 404 means the feed does not know the package; anything else (401, network) is a real error
+      if (err instanceof AxiosError && err.response?.status === 404) {
+        throw new Error(`Package info couldn't be found for url: ${url}`);
+      }
+      throw err;
     }
 
-    if (items.length <= 0) throw { message: "Package info couldn't be found for url:" + url };
+    // A page that fails to load must fail the whole call: a partial version list would report
+    // an old version as the latest one and would be cached
+    for (let i = 0; i < result.data.count; i++) {
+      const page = result.data.items[i];
+      if (page.items) allItems.push(...page.items);
+      else {
+        const pageData = await this.http.get(page["@id"]);
+        allItems.push(...pageData.data.items);
+      }
+    }
+
+    // Unlisted versions are hidden from search and must not be offered as the latest version
+    const listedItems = allItems.filter((v) => v.catalogEntry?.listed !== false);
+    const items = listedItems.length > 0 ? listedItems : allItems;
+
+    if (items.length <= 0) throw new Error(`Package info couldn't be found for url: ${url}`);
     
     // Filter versions based on prerelease flag
     // Prerelease versions contain a hyphen (e.g., 1.0.0-beta)
@@ -304,10 +306,10 @@ export default class NuGetApi {
     const response = await this.ExecuteGet(this._url);
 
     this._searchUrl = await this.GetUrlFromNugetDefinition(response, "SearchQueryService");
-    if (this._searchUrl == "") throw { message: "SearchQueryService couldn't be found" };
+    if (this._searchUrl == "") throw new Error("SearchQueryService couldn't be found");
     if (!this._searchUrl.endsWith("/")) this._searchUrl += "/";
     this._packageInfoUrl = await this.GetRegistrationsBaseUrl(response);
-    if (this._packageInfoUrl == "") throw { message: "RegistrationsBaseUrl couldn't be found" };
+    if (this._packageInfoUrl == "") throw new Error("RegistrationsBaseUrl couldn't be found");
     if (!this._packageInfoUrl.endsWith("/")) this._packageInfoUrl += "/";
 
     // Vulnerability endpoint is optional (not all feeds support it)
@@ -345,15 +347,8 @@ export default class NuGetApi {
     config?: AxiosRequestConfig<any> | undefined
   ): Promise<AxiosResponse<any, any>> {
     Logger.debug(`NuGetApi.ExecuteGet: Requesting ${url}`);
-    const response = await this.http.get(url, config);
-    if (response instanceof AxiosError) {
-      Logger.error("NuGetApi.ExecuteGet: Axios Error Data:", response.response?.data);
-      throw {
-        message: `${response.message} on request to${url}`,
-      };
-    }
-
-    return response;
+    // axios rejects with an AxiosError for failed requests; callers format it with the status/URL
+    return await this.http.get(url, config);
   }
 
   private getProxy(): AxiosProxyConfig | undefined {
