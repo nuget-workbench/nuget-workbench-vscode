@@ -5,7 +5,7 @@ import { sharedStyles } from "@/web/styles/shared.css";
 import { hostApi } from "../registrations";
 import { ProjectPackageViewModel, ProjectViewModel } from "../types";
 import type { UpdateProjectRequest } from "@/common/rpc/types";
-import { compareVersions } from "@/common/version";
+import { compareVersions, isNonConcreteVersion } from "@/common/version";
 
 const styles = css`
   .project-row {
@@ -77,9 +77,11 @@ export class ProjectRow extends LitElement {
       if (!confirm.ok || !confirm.value.Confirmed) return;
     }
 
+    // The row can be given another project while dotnet runs; the result belongs to this one
+    const project = this.project;
     const request: UpdateProjectRequest = {
       Type: type,
-      ProjectPath: this.project.Path,
+      ProjectPath: project.Path,
       PackageId: this.packageId,
       Version: this.packageVersion,
       SourceUrl: this.sourceUrl,
@@ -93,7 +95,7 @@ export class ProjectRow extends LitElement {
     if (!result.ok) {
       this.errors.set(request.PackageId, result.error);
     } else {
-      this.project.Packages = result.value.Project.Packages.map(
+      project.Packages = result.value.Project.Packages.map(
         (x) => new ProjectPackageViewModel(x)
       );
       this.dispatchEvent(
@@ -140,7 +142,8 @@ export class ProjectRow extends LitElement {
     }
 
     const cmp = version && target ? compareVersions(target, version) : 0;
-    const canChange = cmp !== 0 && !pkg.IsPinned;
+    // "$(Prop)", floating and range versions would be replaced by a fixed version
+    const canChange = cmp !== 0 && !pkg.IsPinned && !isNonConcreteVersion(version ?? "");
     const isDowngrade = canChange && cmp < 0;
 
     return html`

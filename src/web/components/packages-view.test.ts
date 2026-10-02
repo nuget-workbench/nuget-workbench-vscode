@@ -164,12 +164,12 @@ suite('PackagesView Component', () => {
         test('should append packages when append is true', async () => {
             // First load
             packagesView.packages = [
-                new PackageViewModel(createMockPackage({ Id: 'Existing' }))
+                new PackageViewModel(createMockPackage({ Id: 'Existing', Name: 'Existing' }))
             ];
             packagesView.packagesPage = 1;
 
             (mockHostApi.getPackages as sinon.SinonStub).resolves(
-                ok({ Packages: [createMockPackage({ Id: 'NewPackage' })] })
+                ok({ Packages: [createMockPackage({ Id: 'NewPackage', Name: 'NewPackage' })] })
             );
 
             await packagesView.LoadPackages(true);
@@ -177,6 +177,53 @@ suite('PackagesView Component', () => {
             assert.strictEqual(packagesView.packages.length, 2);
             assert.strictEqual(packagesView.packages[0].Id, 'Existing');
             assert.strictEqual(packagesView.packages[1].Id, 'NewPackage');
+        });
+
+        test('should not append a package that an earlier page already returned', async () => {
+            packagesView.packages = [
+                new PackageViewModel(createMockPackage({ Id: 'url/serilog', Name: 'Serilog' }))
+            ];
+            packagesView.packagesPage = 1;
+
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(
+                ok({ Packages: [
+                    createMockPackage({ Id: 'other-feed/serilog', Name: 'serilog' }),
+                    createMockPackage({ Id: 'url/nlog', Name: 'NLog' }),
+                ] })
+            );
+
+            await packagesView.LoadPackages(true);
+
+            assert.deepStrictEqual(packagesView.packages.map(p => p.Name), ['Serilog', 'NLog']);
+        });
+
+        test('should discard the response of an older search', async () => {
+            const resolvers: Array<(v: unknown) => void> = [];
+            (mockHostApi.getPackages as sinon.SinonStub).callsFake(() => new Promise(r => resolvers.push(r)));
+
+            packagesView.filters = { ...packagesView.filters, Query: 'new' };
+            const first = packagesView.LoadPackages();
+            packagesView.filters = { ...packagesView.filters, Query: 'newtonsoft' };
+            const second = packagesView.LoadPackages();
+
+            // The older request answers first
+            resolvers[0](ok({ Packages: [createMockPackage({ Id: 'a', Name: 'NewRelic' })] }));
+            await first;
+            resolvers[1](ok({ Packages: [createMockPackage({ Id: 'b', Name: 'Newtonsoft.Json' })] }));
+            await second;
+
+            assert.deepStrictEqual(packagesView.packages.map(p => p.Name), ['Newtonsoft.Json']);
+            assert.strictEqual(packagesView.packagesPage, 1);
+        });
+
+        test('should keep the feed of each search result', async () => {
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(
+                ok({ Packages: [createMockPackage({ SourceUrl: 'https://private.nuget.org' })] })
+            );
+
+            await packagesView.LoadPackages();
+
+            assert.strictEqual(packagesView.packages[0].SourceUrl, 'https://private.nuget.org');
         });
 
         test('should reset packages when append is false', async () => {
@@ -309,12 +356,34 @@ suite('PackagesView Component', () => {
 
         test('should set status to Error if package fetch fails', async () => {
             const pkg = new PackageViewModel(createMockPackage(), 'MissingDetails');
+            const revision = pkg.Revision;
 
             (mockHostApi.getPackage as sinon.SinonStub).resolves(fail('Not found'));
 
             await packagesView.SelectPackage(pkg);
 
             assert.strictEqual(pkg.Status, 'Error');
+            // Rows bound to .revision must re-render to replace the spinner
+            assert.ok(pkg.Revision > revision);
+        });
+
+        test('should keep the model version when details arrive twice', async () => {
+            const pkg = new PackageViewModel(createMockPackage({ Version: '' }), 'MissingDetails');
+            const details = () => ok({ Package: createMockPackage({ Version: '1.0.0' }), SourceUrl: 'https://api.nuget.org' });
+            const resolvers: Array<(v: unknown) => void> = [];
+            (mockHostApi.getPackage as sinon.SinonStub).callsFake(() => new Promise(r => resolvers.push(r)));
+
+            // Installed list and a click load the same package at the same time
+            packagesView.projectsPackages = [pkg];
+            const loading = (packagesView as any).UpdatePackage(pkg);
+            const selecting = packagesView.SelectPackage(pkg);
+            resolvers[0](details());
+            await loading;
+            resolvers[1](details());
+            await selecting;
+
+            assert.strictEqual(pkg.Model.Version, '1.0.0');
+            assert.strictEqual(packagesView.PackageVersionUrl, 'url1');
         });
     });
 

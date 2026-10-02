@@ -143,12 +143,15 @@ export function createHostAPI(): HostAPI {
             const promises = sources.map(async (source) => {
               try {
                 const api = await nugetApiFactory.GetSourceApi(source.Url);
-                return await api.GetPackagesAsync(
+                const result = await api.GetPackagesAsync(
                   request.Filter,
                   request.Prerelease,
                   request.Skip,
                   request.Take
                 );
+                // The details pane loads versions/dependencies from the feed that returned the package
+                result.data.forEach((pkg) => (pkg.SourceUrl = source.Url));
+                return result;
               } catch (error) {
                 Logger.error(`getPackages: Failed to fetch from ${source.Url}`, error);
                 errors.push(error);
@@ -191,6 +194,7 @@ export function createHostAPI(): HostAPI {
           request.Take
         );
         Logger.info(`getPackages: Successfully fetched ${packages.data.length} packages`);
+        packages.data.forEach((pkg) => (pkg.SourceUrl = request.Url));
         return ok({ Packages: packages.data });
       } catch (err: unknown) {
         Logger.error(`getPackages: Failed`, err);

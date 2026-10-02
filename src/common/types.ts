@@ -13,6 +13,8 @@ type Package = {
   Version: string;
   Versions: Array<PackageVersion>;
   Tags: Array<string>;
+  /** Feed the package was found in (set for search results). */
+  SourceUrl?: string;
 };
 
 type PackageVersion = {

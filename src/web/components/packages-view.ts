@@ -3,13 +3,13 @@ import { customElement, state } from "lit/decorators.js";
 import { repeat } from "lit/directives/repeat.js";
 
 import Split from "split.js";
-import hash from "object-hash";
 import lodash from "lodash";
 import { hostApi, configuration } from "@/web/registrations";
 import codicon from "@/web/styles/codicon.css";
 import { scrollableBase } from "@/web/styles/base.css";
 import { sharedStyles } from "@/web/styles/shared.css";
 import { PackageViewModel, ProjectViewModel } from "../types";
+import { isNonConcreteVersion } from "@/common/version";
 import type { FilterEvent } from "./search-bar";
 import type { SearchBar } from "./search-bar";
 import type { UpdatesView } from "./updates-view";
@@ -290,7 +290,8 @@ export class PackagesView extends LitElement {
   private splitter: Split.Instance | null = null;
   packagesPage: number = 0;
   @state() packagesLoadingInProgress: boolean = false;
-  private currentLoadPackageHash: string = "";
+  private loadPackagesSeq = 0;
+  private loadProjectsSeq = 0;
 
   @state() activeTab: TabId = "browse";
   @state() projects: Array<ProjectViewModel> = [];
@@ -477,16 +478,17 @@ export class PackagesView extends LitElement {
   private async onChildPackageSelected(e: CustomEvent<{ packageId: string; sourceUrl?: string }>): Promise<void> {
     const { packageId, sourceUrl } = e.detail;
 
-    // Check if we already have this package in projectsPackages (installed)
+    // Check if we already have this package in projectsPackages (installed).
+    // Name is the package id; Id becomes the registration URL once details are loaded.
     const lowerId = packageId.toLowerCase();
-    const existing = this.projectsPackages.find((p) => p.Id.toLowerCase() === lowerId);
+    const existing = this.projectsPackages.find((p) => p.Name.toLowerCase() === lowerId);
     if (existing) {
       await this.SelectPackage(existing);
       return;
     }
 
     // Check if we have it in browse packages
-    const browsePkg = this.packages.find((p) => p.Id.toLowerCase() === lowerId);
+    const browsePkg = this.packages.find((p) => p.Name.toLowerCase() === lowerId);
     if (browsePkg) {
       await this.SelectPackage(browsePkg);
       return;
@@ -559,6 +561,7 @@ export class PackagesView extends LitElement {
   }, 300);
 
   private loadProjectsPackagesSeq = 0;
+  private installedStatusBarShown = false;
 
   async LoadProjectsPackages(forceReload: boolean = false): Promise<void> {
     const seq = ++this.loadProjectsPackagesSeq;
@@ -570,25 +573,28 @@ export class PackagesView extends LitElement {
         x.Id.toLowerCase().includes(this.filters.Query?.toLowerCase())
       );
 
+    // NuGet ids are case-insensitive: "Newtonsoft.Json" and "newtonsoft.json" are one package
     const grouped = packages.reduce(
       (
         acc: {
-          [key: string]: { versions: string[]; allowsUpdate: boolean };
+          [key: string]: { id: string; versions: string[]; allowsUpdate: boolean };
         },
         item
       ) => {
         const { Id, Version, IsPinned } = item;
+        const key = Id.toLowerCase();
 
-        if (!acc[Id]) {
-          acc[Id] = { versions: [], allowsUpdate: false };
+        if (!acc[key]) {
+          acc[key] = { id: Id, versions: [], allowsUpdate: false };
         }
 
-        if (acc[Id].versions.indexOf(Version) < 0) {
-          acc[Id].versions.push(Version);
+        if (acc[key].versions.indexOf(Version) < 0) {
+          acc[key].versions.push(Version);
         }
 
-        if (!IsPinned) {
-          acc[Id].allowsUpdate = true;
+        // "$(Prop)", floating and range versions are not updated to a fixed version from here
+        if (!IsPinned && !isNonConcreteVersion(Version)) {
+          acc[key].allowsUpdate = true;
         }
 
         return acc;
@@ -596,7 +602,8 @@ export class PackagesView extends LitElement {
       {}
     );
 
-    this.projectsPackages = Object.entries(grouped).map(([Id, data]) => {
+    this.projectsPackages = Object.values(grouped).map((data) => {
+      const Id = data.id;
       const pkg = new PackageViewModel(
         {
           Id: Id,
@@ -630,6 +637,7 @@ export class PackagesView extends LitElement {
     let completed = 0;
 
     if (total > 0) {
+      this.installedStatusBarShown = true;
       hostApi.updateStatusBar({
         Percentage: 0,
         Message: "Loading installed packages...",
@@ -652,7 +660,9 @@ export class PackagesView extends LitElement {
     } finally {
       if (seq === this.loadProjectsPackagesSeq) {
         this.projectsPackages = [...this.projectsPackages];
-        if (total > 0) {
+        // Also hides an indicator that an older, superseded load has shown
+        if (this.installedStatusBarShown) {
+          this.installedStatusBarShown = false;
           hostApi.updateStatusBar({ Percentage: null });
         }
       }
@@ -700,13 +710,10 @@ export class PackagesView extends LitElement {
     });
 
     if (!result.ok || !result.value.Package) {
-      projectPackage.Status = "Error";
+      // Details that SelectPackage loaded meanwhile stay valid
+      if (projectPackage.Status !== "Detailed") projectPackage.SetError();
     } else {
-      if (projectPackage.Version !== "") result.value.Package.Version = "";
-      projectPackage.UpdatePackage(
-        result.value.Package,
-        result.value.SourceUrl
-      );
+      projectPackage.UpdatePackage(result.value.Package, result.value.SourceUrl, true);
       projectPackage.Status = "Detailed";
     }
   }
@@ -753,23 +760,21 @@ export class PackagesView extends LitElement {
       const versionBeforeLoad = this.selectedVersion;
       const result = await hostApi.getPackage({
         Id: packageToUpdate.Id,
-        Url: this.filters.SourceUrl,
+        // A package opened from the Updates tab knows the feed it was found in
+        Url: packageToUpdate.SourceUrl || this.filters.SourceUrl,
         SourceName: this.CurrentSource?.Name,
         Prerelease: this.filters.Prerelease,
         PasswordScriptPath: this.CurrentSource?.PasswordScriptPath,
       });
 
-      if (!result.ok || !result.value.Package) {
-        packageToUpdate.Status = "Error";
-      } else {
-        if (packageToUpdate.Version !== "") {
-          result.value.Package.Version = "";
+      // The installed list may have loaded the details while this request was running
+      if (packageToUpdate.Status !== "Detailed") {
+        if (!result.ok || !result.value.Package) {
+          packageToUpdate.SetError();
+        } else {
+          packageToUpdate.UpdatePackage(result.value.Package, result.value.SourceUrl, true);
+          packageToUpdate.Status = "Detailed";
         }
-        packageToUpdate.UpdatePackage(
-          result.value.Package,
-          result.value.SourceUrl
-        );
-        packageToUpdate.Status = "Detailed";
       }
 
       // The user selected another package (or picked a version) while this was loading
@@ -836,12 +841,12 @@ export class PackagesView extends LitElement {
     this.noMorePackages = false;
 
     const requestObject = buildRequest();
-    this.currentLoadPackageHash = hash(requestObject);
+    const seq = ++this.loadPackagesSeq;
 
     const result = await hostApi.getPackages(requestObject);
 
-    if (this.currentLoadPackageHash !== hash(buildRequest())) {
-      // A newer request was started, discard this result
+    if (seq !== this.loadPackagesSeq) {
+      // A newer request (new query or next page) was started, discard this result
       return;
     }
 
@@ -858,7 +863,11 @@ export class PackagesView extends LitElement {
       if (packagesViewModels.length < requestObject.Take) {
         this.noMorePackages = true;
       }
-      this.packages = [...this.packages, ...packagesViewModels];
+      // Paging can shift between requests and "All sources" pages are merged per page,
+      // so a package may come again on a later page
+      const known = new Set(this.packages.map((p) => p.Name.toLowerCase()));
+      const added = packagesViewModels.filter((p) => !known.has(p.Name.toLowerCase()));
+      this.packages = [...this.packages, ...added];
       this.packagesPage++;
       this.packagesLoadingInProgress = false;
     }
@@ -868,9 +877,12 @@ export class PackagesView extends LitElement {
   @state() projectsLoadingError: string = "";
 
   async LoadProjects(forceReload: boolean = false): Promise<void> {
+    const seq = ++this.loadProjectsSeq;
     this.projectsLoading = true;
     this.projectsLoadingError = "";
     const result = await hostApi.getProjects({ ForceReload: forceReload });
+    // An older response must neither overwrite a newer one nor end the loading state early
+    if (seq !== this.loadProjectsSeq) return;
     this.projectsLoading = false;
 
     if (!result.ok) {
@@ -943,6 +955,11 @@ export class PackagesView extends LitElement {
   }
 
   private renderInstalledTab(): unknown {
+    // The installed list is rebuilt on every filter change or reload; keep highlighting the
+    // selected package in the new list (unless it was selected in Browse)
+    const selected = this.selectedPackage;
+    const selectedName =
+      selected && !this.packages.includes(selected) ? selected.Name.toLowerCase() : null;
     return html`
       <div class="packages-container installed-packages">
         ${this.noProjectsSelected
@@ -965,7 +982,7 @@ export class PackagesView extends LitElement {
                       .showInstalledVersion=${true}
                       .package=${pkg}
                       .revision=${pkg.Revision}
-                      .selected=${pkg === this.selectedPackage}
+                      .selected=${pkg === selected || (selectedName !== null && pkg.Name.toLowerCase() === selectedName)}
                       @click=${() => this.SelectPackage(pkg)}
                     ></package-row>
                   `
@@ -1057,7 +1074,10 @@ export class PackagesView extends LitElement {
       </div>
       <div class="projects-panel-container">
         ${this.filteredProjects.length > 0
-          ? this.filteredProjects.map(
+          ? repeat(
+              this.filteredProjects,
+              // Keyed, so a running install stays with its project when the selection changes
+              (project) => project.Path,
               (project) => html`
                 <project-row
                   @project-updated=${(e: CustomEvent) =>
@@ -1065,7 +1085,7 @@ export class PackagesView extends LitElement {
                   .project=${project}
                   .packageId=${this.selectedPackage?.Name}
                   .packageVersion=${this.selectedVersion}
-                  .sourceUrl=${this.selectedPackage?.SourceUrl}
+                  .sourceUrl=${this.selectedPackage?.SourceUrl || this.filters.SourceUrl}
                 ></project-row>
               `
             )

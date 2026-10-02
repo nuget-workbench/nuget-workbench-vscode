@@ -198,6 +198,48 @@ suite('ProjectRow Component', () => {
         assert.strictEqual(error?.getAttribute('title'), 'dotnet exited with code 1');
     });
 
+    test('should not offer an update for a property or floating version', async () => {
+        projectRow.project = createMockProject('TestProject', 'path/to/project', [
+            { Id: 'TestPackage', Version: '$(TestPackageVersion)' },
+        ]);
+        projectRow.packageVersion = '2.0.0';
+        await projectRow.updateComplete;
+
+        const shadowRoot = projectRow.shadowRoot;
+        assert.strictEqual(shadowRoot?.querySelector('.codicon-arrow-circle-up'), null);
+        assert.ok(shadowRoot?.querySelector('.codicon-diff-removed'), 'uninstall stays available');
+    });
+
+    test('should apply the result to the project it was started for', async () => {
+        const projectA = createMockProject('A', 'path/to/A', []);
+        const projectB = createMockProject('B', 'path/to/B', []);
+        projectRow.project = projectA;
+        projectRow.packageId = 'Serilog';
+        projectRow.packageVersion = '3.0.0';
+        await projectRow.updateComplete;
+
+        type UpdateResult = Awaited<ReturnType<HostAPI['updateProject']>>;
+        let resolveUpdate!: (v: UpdateResult) => void;
+        mockHostApi.updateProject = () => new Promise<UpdateResult>(r => { resolveUpdate = r; });
+
+        (projectRow.shadowRoot?.querySelector('.icon-btn') as HTMLElement).click();
+        // The row is given another project while dotnet runs
+        projectRow.project = projectB;
+        resolveUpdate(ok({
+            Project: {
+                Name: 'A',
+                Path: 'path/to/A',
+                Packages: [{ Id: 'Serilog', Version: '3.0.0', IsPinned: false, VersionSource: 'project' as VersionSource }],
+                CpmEnabled: false,
+            },
+            IsCpmEnabled: false,
+        }));
+        await new Promise(r => setTimeout(r, 20));
+
+        assert.deepStrictEqual(projectA.Packages.map(p => p.Id), ['Serilog']);
+        assert.strictEqual(projectB.Packages.length, 0);
+    });
+
     test('should not offer an update for an equivalent version', async () => {
         projectRow.packageId = 'TestPackage';
         projectRow.packageVersion = '1.0';
