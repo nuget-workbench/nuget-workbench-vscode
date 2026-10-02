@@ -61,6 +61,24 @@ suite('CustomDropdown Component', () => {
         assert.strictEqual(dropdown.shadowRoot!.querySelector('.dropdown-menu'), null);
     });
 
+    test('keeps the active option valid when the options shrink while open', async () => {
+        await press('Enter');
+        await press('End'); // active = "c"
+        dropdown.options = [{ value: 'a', label: 'A' }];
+        await dropdown.updateComplete;
+
+        const activeId = trigger().getAttribute('aria-activedescendant');
+        assert.strictEqual(dropdown.shadowRoot!.getElementById(activeId!)?.textContent?.trim(), 'A');
+    });
+
+    test('closes when removed from the document', async () => {
+        await press('Enter');
+        document.body.removeChild(dropdown);
+        document.body.appendChild(dropdown);
+        await dropdown.updateComplete;
+        assert.strictEqual(dropdown.shadowRoot!.querySelector('.dropdown-menu'), null);
+    });
+
     test('does not open when disabled', async () => {
         dropdown.disabled = true;
         await dropdown.updateComplete;

@@ -212,6 +212,17 @@ export class CustomDropdown extends LitElement {
     }
   }
 
+  protected willUpdate(changed: Map<string, unknown>): void {
+    // The option list can change while the menu is open (e.g. versions of another package)
+    if (changed.has("options") && this.open) {
+      if (this.options.length === 0) {
+        this.closeMenu();
+      } else if (this.activeIndex >= this.options.length) {
+        this.activeIndex = this.options.length - 1;
+      }
+    }
+  }
+
   protected updated(changed: Map<string, unknown>): void {
     if ((changed.has("activeIndex") || changed.has("open")) && this.open && this.activeIndex >= 0) {
       const el = this.shadowRoot?.getElementById(`${this.menuId}-opt-${this.activeIndex}`);
@@ -239,7 +250,8 @@ export class CustomDropdown extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
-    this.removeOutsideClickListener();
+    // Close, so the menu is not open without its outside-click listener after a reconnect
+    this.closeMenu();
   }
 
   render(): unknown {

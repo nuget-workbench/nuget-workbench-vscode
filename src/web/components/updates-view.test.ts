@@ -83,6 +83,55 @@ suite('UpdatesView Component', () => {
         assert.strictEqual(button().disabled, true);
     });
 
+    test('defers a reload requested while an update runs', async () => {
+        let resolveUpdate!: (v: Awaited<ReturnType<HostAPI['batchUpdatePackages']>>) => void;
+        mockHostApi.batchUpdatePackages = () => new Promise(r => { resolveUpdate = r; });
+        let loads = 0;
+        mockHostApi.getOutdatedPackages = async () => { loads++; return ok({ Packages: [outdated('Pkg.B')] }); };
+
+        (view.shadowRoot?.querySelector('.primary-btn') as HTMLButtonElement).click();
+        await new Promise(r => setTimeout(r, 10));
+
+        // e.g. the project selection changed while dotnet runs
+        await view.LoadOutdatedPackages();
+        assert.strictEqual(loads, 0, 'no reload while busy');
+        assert.ok(view.packages.every(p => p.IsUpdating), 'rows keep their busy state');
+
+        resolveUpdate(ok({ Results: [{ PackageId: 'Pkg.A', Success: true }, { PackageId: 'Pkg.B', Success: true }] }));
+        await new Promise(r => setTimeout(r, 20));
+
+        assert.strictEqual(loads, 1, 'reload runs after the update');
+        assert.deepStrictEqual(view.packages.map(p => p.Id), ['Pkg.B']);
+    });
+
+    test('a second click while the confirmation is open does not start another update', async () => {
+        let confirmations = 0;
+        let resolveConfirm!: (v: Awaited<ReturnType<HostAPI['showConfirmation']>>) => void;
+        mockHostApi.showConfirmation = () => { confirmations++; return new Promise(r => { resolveConfirm = r; }); };
+        let batches = 0;
+        mockHostApi.batchUpdatePackages = async () => { batches++; return ok({ Results: [] }); };
+
+        const button = view.shadowRoot?.querySelector('.primary-btn') as HTMLButtonElement;
+        button.click();
+        button.click();
+        resolveConfirm(ok({ Confirmed: true }));
+        await new Promise(r => setTimeout(r, 20));
+
+        assert.strictEqual(confirmations, 1);
+        assert.strictEqual(batches, 1);
+    });
+
+    test('keeps unchecked packages unchecked across reloads', async () => {
+        const rowCheckbox = view.shadowRoot?.querySelector('.row-checkbox') as HTMLInputElement;
+        rowCheckbox.checked = false;
+        rowCheckbox.dispatchEvent(new Event('change'));
+
+        mockHostApi.getOutdatedPackages = async () => ok({ Packages: [outdated('pkg.a'), outdated('Pkg.B')] });
+        await view.LoadOutdatedPackages();
+
+        assert.deepStrictEqual(view.packages.map(p => p.Selected), [false, true]);
+    });
+
     test('ignores a stale load that finishes after a newer one', async () => {
         let resolveFirst!: (v: unknown) => void;
         mockHostApi.getOutdatedPackages = () => new Promise(r => { resolveFirst = r; }) as any;

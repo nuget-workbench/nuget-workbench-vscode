@@ -114,8 +114,12 @@ export class ConsolidateView extends LitElement {
   @state() statusText: string = "";
   @property({ attribute: false }) projectPaths: string[] = [];
 
+  @state() private confirming: boolean = false;
+
   private loaded = false;
   private loadSeq = 0;
+  // A reload requested while a consolidation runs is done afterwards (it would drop the busy state)
+  private reloadPending = false;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -126,7 +130,25 @@ export class ConsolidateView extends LitElement {
   }
 
   private get isBusy(): boolean {
-    return this.isConsolidating || this.packages.some((p) => p.IsConsolidating);
+    return this.isConsolidating || this.confirming || this.packages.some((p) => p.IsConsolidating);
+  }
+
+  private runPendingReload(): void {
+    if (this.reloadPending && !this.isBusy) {
+      this.reloadPending = false;
+      this.LoadInconsistentPackages();
+    }
+  }
+
+  /** Shows the dialog while the view counts as busy, so a second click cannot start the same action. */
+  private async confirm(message: string, detail: string): Promise<boolean> {
+    this.confirming = true;
+    try {
+      const result = await hostApi.showConfirmation({ Message: message, Detail: detail });
+      return result.ok && result.value.Confirmed;
+    } finally {
+      this.confirming = false;
+    }
   }
 
   private emitCount(count: number | null): void {
@@ -143,6 +165,10 @@ export class ConsolidateView extends LitElement {
   }
 
   async LoadInconsistentPackages(): Promise<void> {
+    if (this.isBusy) {
+      this.reloadPending = true;
+      return;
+    }
     const seq = ++this.loadSeq;
     this.isLoading = true;
     this.hasError = false;
@@ -221,7 +247,8 @@ export class ConsolidateView extends LitElement {
     if (failed > 0) {
       this.statusText = `${failed} of ${attempted} consolidation${attempted !== 1 ? "s" : ""} failed`;
     }
-    if (succeeded.size > 0) {
+    // A failed consolidation may still have changed the projects before the failing one
+    if (attempted > 0) {
       this.dispatchEvent(new CustomEvent("projects-changed", { bubbles: true, composed: true }));
     }
   }
@@ -229,25 +256,32 @@ export class ConsolidateView extends LitElement {
   private async consolidateSingle(pkg: InconsistentPackageViewModel): Promise<void> {
     if (this.isBusy) return;
     const projectCount = pkg.Versions.reduce((n, v) => n + v.Projects.length, 0);
-    const confirm = await hostApi.showConfirmation({
-      Message: `Consolidate ${pkg.Id} to ${pkg.TargetVersion}?`,
-      Detail: `This will set ${pkg.Id} to version ${pkg.TargetVersion} in ${projectCount} project${projectCount !== 1 ? "s" : ""}.`,
-    });
-    if (!confirm.ok || !confirm.value.Confirmed) return;
+    const confirmed = await this.confirm(
+      `Consolidate ${pkg.Id} to ${pkg.TargetVersion}?`,
+      `This will set ${pkg.Id} to version ${pkg.TargetVersion} in ${projectCount} project${projectCount !== 1 ? "s" : ""}.`
+    );
+    if (!confirmed) {
+      this.runPendingReload();
+      return;
+    }
 
     this.statusText = `Consolidating ${pkg.Id}...`;
     const ok = await this.runConsolidate(pkg);
     this.finishConsolidation(1, ok ? new Set([pkg.Id]) : new Set());
+    this.runPendingReload();
   }
 
   private async consolidateAll(): Promise<void> {
     if (this.isBusy) return;
     const targets = [...this.packages];
-    const confirm = await hostApi.showConfirmation({
-      Message: `Consolidate ${targets.length} package${targets.length !== 1 ? "s" : ""}?`,
-      Detail: targets.map((p) => `${p.Id} -> ${p.TargetVersion}`).join("\n"),
-    });
-    if (!confirm.ok || !confirm.value.Confirmed) return;
+    const confirmed = await this.confirm(
+      `Consolidate ${targets.length} package${targets.length !== 1 ? "s" : ""}?`,
+      targets.map((p) => `${p.Id} -> ${p.TargetVersion}`).join("\n")
+    );
+    if (!confirmed) {
+      this.runPendingReload();
+      return;
+    }
 
     this.isConsolidating = true;
     const succeeded = new Set<string>();
@@ -263,6 +297,7 @@ export class ConsolidateView extends LitElement {
     } finally {
       this.isConsolidating = false;
       this.finishConsolidation(targets.length, succeeded);
+      this.runPendingReload();
     }
   }
 

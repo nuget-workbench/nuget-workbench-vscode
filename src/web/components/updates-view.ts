@@ -70,8 +70,14 @@ export class UpdatesView extends LitElement {
   @property({ attribute: false }) projectPaths: string[] = [];
   @property() sourceUrl: string = "";
 
+  @state() private confirming: boolean = false;
+
   private loaded = false;
   private loadSeq = 0;
+  // A reload requested while an update runs is done afterwards (it would drop the busy state)
+  private reloadPending = false;
+  // Lowercase ids the user unchecked; kept across reloads (new packages default to selected)
+  private deselected = new Set<string>();
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -82,7 +88,20 @@ export class UpdatesView extends LitElement {
   }
 
   private get isBusy(): boolean {
-    return this.isUpdating || this.packages.some((p) => p.IsUpdating);
+    return this.isUpdating || this.confirming || this.packages.some((p) => p.IsUpdating);
+  }
+
+  private setSelected(pkg: OutdatedPackageViewModel, selected: boolean): void {
+    pkg.Selected = selected;
+    if (selected) this.deselected.delete(pkg.Id.toLowerCase());
+    else this.deselected.add(pkg.Id.toLowerCase());
+  }
+
+  private runPendingReload(): void {
+    if (this.reloadPending && !this.isBusy) {
+      this.reloadPending = false;
+      this.LoadOutdatedPackages();
+    }
   }
 
   private get selectedCount(): number {
@@ -107,9 +126,11 @@ export class UpdatesView extends LitElement {
   }
 
   async LoadOutdatedPackages(): Promise<void> {
+    if (this.isBusy) {
+      this.reloadPending = true;
+      return;
+    }
     const seq = ++this.loadSeq;
-    // Keep the user's selection across reloads (new packages default to selected)
-    const previousSelection = new Map(this.packages.map((p) => [p.Id, p.Selected]));
 
     this.isLoading = true;
     this.hasError = false;
@@ -133,7 +154,7 @@ export class UpdatesView extends LitElement {
       } else {
         this.packages = (result.value.Packages ?? []).map((p) => {
           const vm = new OutdatedPackageViewModel(p);
-          vm.Selected = previousSelection.get(vm.Id) ?? true;
+          vm.Selected = !this.deselected.has(vm.Id.toLowerCase());
           return vm;
         });
         this.emitCount(this.packages.length);
@@ -199,7 +220,8 @@ export class UpdatesView extends LitElement {
     if (failed > 0) {
       this.statusText = `${failed} of ${attempted.length} update${attempted.length !== 1 ? "s" : ""} failed`;
     }
-    if (succeeded.size > 0) {
+    // A failed package may still have been changed in some of its projects
+    if (attempted.length > 0) {
       this.emitProjectsChanged();
     }
   }
@@ -209,17 +231,29 @@ export class UpdatesView extends LitElement {
     this.statusText = `Updating ${pkg.Id}...`;
     const succeeded = await this.runUpdates([pkg]);
     this.applyResults([pkg], succeeded);
+    this.runPendingReload();
   }
 
   private async updateAllSelected(): Promise<void> {
     const selected = this.packages.filter((p) => p.Selected);
     if (selected.length === 0 || this.isBusy) return;
 
-    const confirm = await hostApi.showConfirmation({
-      Message: `Update ${selected.length} package${selected.length !== 1 ? "s" : ""}?`,
-      Detail: selected.map((p) => `${p.Id}: ${p.InstalledVersion} -> ${p.LatestVersion}`).join("\n"),
-    });
-    if (!confirm.ok || !confirm.value.Confirmed) return;
+    // Busy while the dialog is open, so a second click cannot queue the same update again
+    this.confirming = true;
+    let confirmed = false;
+    try {
+      const confirm = await hostApi.showConfirmation({
+        Message: `Update ${selected.length} package${selected.length !== 1 ? "s" : ""}?`,
+        Detail: selected.map((p) => `${p.Id}: ${p.InstalledVersion} -> ${p.LatestVersion}`).join("\n"),
+      });
+      confirmed = confirm.ok && confirm.value.Confirmed;
+    } finally {
+      this.confirming = false;
+    }
+    if (!confirmed) {
+      this.runPendingReload();
+      return;
+    }
 
     this.isUpdating = true;
     this.statusText = `Updating ${selected.length} package${selected.length !== 1 ? "s" : ""}...`;
@@ -228,11 +262,12 @@ export class UpdatesView extends LitElement {
       this.applyResults(selected, succeeded);
     } finally {
       this.isUpdating = false;
+      this.runPendingReload();
     }
   }
 
   private toggleSelectAll(checked: boolean): void {
-    this.packages.forEach((p) => (p.Selected = checked));
+    this.packages.forEach((p) => this.setSelected(p, checked));
     this.requestUpdate();
   }
 
@@ -266,7 +301,7 @@ export class UpdatesView extends LitElement {
           .checked=${pkg.Selected}
           ?disabled=${this.isBusy}
           @change=${(e: Event) => {
-            pkg.Selected = (e.target as HTMLInputElement).checked;
+            this.setSelected(pkg, (e.target as HTMLInputElement).checked);
             this.requestUpdate();
           }}
         />
