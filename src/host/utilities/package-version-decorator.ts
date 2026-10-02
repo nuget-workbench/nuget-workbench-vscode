@@ -2,11 +2,16 @@ import * as vscode from 'vscode';
 import { Logger } from '../../common/logger';
 import NuGetConfigResolver from './nuget-config-resolver';
 import nugetApiFactory from '../nuget/api-factory';
+import { compareVersions, isNonConcreteVersion } from '../../common/version';
+
+// Failed lookups are retried after this time (e.g. VS Code started before the VPN was up)
+const FAILED_LOOKUP_TTL_MS = 10 * 60 * 1000;
 
 export class PackageVersionDecorator implements vscode.Disposable {
     private _disposables: vscode.Disposable[] = [];
     private _decorationType: vscode.TextEditorDecorationType;
-    private _failedCache: Set<string> = new Set(); // PackageIds that failed to fetch
+    private _failedCache: Map<string, number> = new Map(); // PackageId -> time of the failed fetch
+    private _updateSeq = 0;
     private _isEnabled: boolean = false;
     private _prerelease: boolean = false;
 
@@ -71,10 +76,20 @@ export class PackageVersionDecorator implements vscode.Disposable {
         }, 500);
     }
 
+    private hasFailedRecently(packageId: string): boolean {
+        const failedAt = this._failedCache.get(packageId);
+        if (failedAt === undefined) return false;
+        if (Date.now() - failedAt < FAILED_LOOKUP_TTL_MS) return true;
+        this._failedCache.delete(packageId);
+        return false;
+    }
+
     private async updateDecorations(editor: vscode.TextEditor) {
         if (!editor || editor.document.isClosed) {
             return;
         }
+        // A slower, older update must not overwrite the decorations of a newer one
+        const seq = ++this._updateSeq;
 
         if (!this._isEnabled) {
             editor.setDecorations(this._decorationType, []);
@@ -113,7 +128,8 @@ export class PackageVersionDecorator implements vscode.Disposable {
                 // Skip pinned versions (exact version match using [x.x.x] notation - no comma)
                 // Ranges like [1.0,2.0], (1.0,), [1.0,) etc. are NOT pinned and should show updates
                 const isPinned = currentVersion.startsWith('[') && currentVersion.endsWith(']') && !currentVersion.includes(',');
-                if (isPinned) {
+                // "$(Prop)", floating and range versions cannot be compared with a concrete version
+                if (isPinned || isNonConcreteVersion(currentVersion)) {
                     continue;
                 }
 
@@ -133,31 +149,32 @@ export class PackageVersionDecorator implements vscode.Disposable {
                 }
                 packagePositions.get(packageId)!.push({ start: startPos, end: endPos, version: currentVersion });
 
-                if (!this._failedCache.has(packageId)) {
+                if (!this.hasFailedRecently(packageId)) {
                     packagesToFetch.add(packageId);
                 }
             }
         }
 
-        // Fetch and decorate
-        if (packagesToFetch.size > 0) {
-            await this.fetchAndDecorate(packagesToFetch, packagePositions, editor);
-        }
+        // Fetch and decorate; with nothing to fetch, decorations from the previous text are cleared
+        await this.fetchAndDecorate(packagesToFetch, packagePositions, editor, seq);
     }
 
     private async fetchAndDecorate(
         packageIds: Set<string>,
         packagePositions: Map<string, { start: vscode.Position, end: vscode.Position, version: string }[]>,
-        editor: vscode.TextEditor
+        editor: vscode.TextEditor,
+        seq: number
     ) {
         Logger.debug(`PackageVersionDecorator.fetchAndDecorate: Fetching versions for ${Array.from(packageIds).join(', ')}`);
         const decorations: vscode.DecorationOptions[] = [];
 
         const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const sources = await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot);
+        const sources = packageIds.size > 0
+            ? await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot)
+            : [];
 
         const promises = Array.from(packageIds).map(async (packageId) => {
-             if (this._failedCache.has(packageId)) return;
+             if (this.hasFailedRecently(packageId)) return;
 
              try {
                  let latestVersion: string | null = null;
@@ -179,7 +196,8 @@ export class PackageVersionDecorator implements vscode.Disposable {
                     const positions = packagePositions.get(packageId);
                     if (positions) {
                         for (const pos of positions) {
-                            if (pos.version !== latestVersion) {
+                            // Only an actually newer version is worth a hint ("1.0" equals "1.0.0")
+                            if (compareVersions(latestVersion, pos.version) > 0) {
                                 decorations.push({
                                     range: new vscode.Range(pos.start, pos.end),
                                     renderOptions: {
@@ -192,23 +210,27 @@ export class PackageVersionDecorator implements vscode.Disposable {
                         }
                     }
                  } else {
-                     this._failedCache.add(packageId);
+                     this._failedCache.set(packageId, Date.now());
                  }
              } catch (error) {
                  Logger.error(`PackageVersionDecorator.fetchAndDecorate: Failed to fetch version for ${packageId}`, error);
-                 this._failedCache.add(packageId);
+                 this._failedCache.set(packageId, Date.now());
              }
         });
 
         await Promise.all(promises);
 
-        // Ensure editor is still active and valid
-        if (editor && !editor.document.isClosed) {
+        // Ensure editor is still valid and no newer update has started meanwhile
+        if (seq === this._updateSeq && editor && !editor.document.isClosed) {
              editor.setDecorations(this._decorationType, decorations);
         }
     }
 
     dispose() {
+        if (this._timeout) {
+            clearTimeout(this._timeout);
+            this._timeout = undefined;
+        }
         this._disposables.forEach(d => d.dispose());
         this._decorationType.dispose();
     }

@@ -95,7 +95,7 @@ suite('PasswordScriptExecutor Tests', () => {
             const proc = mockProcess;
             
             const [command, args] = spawnStub.firstCall.args;
-            assert.strictEqual(command, 'powershell.exe');
+            assert.strictEqual(command, process.platform === 'win32' ? 'powershell.exe' : 'pwsh');
             assert.ok(args.includes('-File'));
             assert.ok(args.includes(scriptPath));
 
@@ -110,6 +110,42 @@ suite('PasswordScriptExecutor Tests', () => {
 
         const result = await PasswordScriptExecutor.ExecuteScript(scriptPath, encodedPass);
         assert.strictEqual(result, expectedOutput);
+    });
+
+    test('ExecuteScript kills a script that does not finish in time', async () => {
+        sandbox.stub(PasswordScriptExecutor, 'TIMEOUT_MS').value(20);
+        const terminalDispose = sandbox.stub();
+
+        createTerminalStub.callsFake((options: vscode.TerminalOptions | vscode.ExtensionTerminalOptions) => {
+            (options as vscode.ExtensionTerminalOptions).pty!.open(undefined);
+            (mockProcess as any).exitCode = null;
+            (mockProcess as any).killed = false;
+            return { dispose: terminalDispose } as any;
+        });
+
+        await assert.rejects(
+            async () => PasswordScriptExecutor.ExecuteScript('/scripts/hang.sh', 'pass'),
+            /did not finish/
+        );
+        assert.ok(mockProcess.kill.calledOnce);
+        assert.ok(terminalDispose.called);
+    });
+
+    test('ExecuteScript treats a script killed by a signal as failed', async () => {
+        createTerminalStub.callsFake((options: vscode.TerminalOptions | vscode.ExtensionTerminalOptions) => {
+            (options as vscode.ExtensionTerminalOptions).pty!.open(undefined);
+            const proc = mockProcess;
+            setTimeout(() => {
+                proc.stdout.emit('data', Buffer.from('partial'));
+                proc.on.args.find(arg => arg[0] === 'close')?.[1](null);
+            }, 10);
+            return { dispose: sandbox.stub() } as any;
+        });
+
+        await assert.rejects(
+            async () => PasswordScriptExecutor.ExecuteScript('/scripts/killed.sh', 'pass'),
+            /exited with code 1/
+        );
     });
 
     test('ExecuteScript handles script error (non-zero exit code)', async () => {
