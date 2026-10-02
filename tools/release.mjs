@@ -9,9 +9,9 @@
 // - Commits, tags, and pushes
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { parseArgs } from "node:util";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { parseArgs } from "node:util";
 
 const ROOT = join(import.meta.dirname, "..");
 

@@ -41,7 +41,7 @@
 ## Features
 
 | | Feature | Description |
-|---|---|---|
+| --- | --- | --- |
 | 📦 | **Browse & Install** | Search nuget.org and private feeds, install into one or multiple projects at once |
 | 🔄 | **One-click Updates** | See all outdated packages with version diffs, update individually or all at once |
 | 🛡️ | **Vulnerability Scanning** | Color-coded CVE severity badges (Critical / High / Medium / Low) with advisory links |
@@ -171,7 +171,7 @@ The collapsible project tree on the left of the main view lets you scope operati
 Access these from the Command Palette (`Ctrl+Shift+P`):
 
 | Command | ID | Description |
-|---|---|---|
+| --- | --- | --- |
 | **NuGet Workbench: Open Packages** | `nugetWorkbench.open` | Focus the NuGet panel |
 | **NuGet Workbench: Add Package** | `nugetWorkbench.install` | Prompt for a package ID and open Browse with it pre-searched |
 | **NuGet Workbench: Update Package** | `nugetWorkbench.update` | Focus the NuGet panel and switch to the Updates tab |
@@ -186,7 +186,7 @@ Access these from the Command Palette (`Ctrl+Shift+P`):
 Open VS Code Settings (`Ctrl+,`) and search for **NuGet Workbench**, or edit `settings.json` directly.
 
 | Setting | Type | Default | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `NugetWorkbench.sources` | `string[]` | `[nuget.org]` | List of NuGet feed URLs to search and update from. Each entry is a JSON string `{"name":"...","url":"..."}`. |
 | `NugetWorkbench.defaultSource` | `string` | `""` | Default source URL pre-selected in the source dropdown. Empty = use the first configured source. |
 | `NugetWorkbench.prerelease` | `boolean` | `false` | Include pre-release versions when checking for updates. |
@@ -276,6 +276,7 @@ Contributions are welcome — bug reports, feature requests, documentation impro
 ### Reporting Issues
 
 Please use the [GitHub Issues](https://github.com/nuget-workbench/nuget-workbench-vscode/issues) tracker. Include:
+
 - VS Code version
 - Extension version
 - Steps to reproduce
