@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- chore: Sponsor button on the Marketplace page and in the Extensions view (GitHub Sponsors)
+
 ## 1.0.4 (2026-10-02)
 
 - fix: Failed `dotnet` operations are reported as errors instead of success; a failing task no longer blocks all later installs
