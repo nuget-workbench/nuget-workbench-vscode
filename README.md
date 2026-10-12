@@ -42,14 +42,17 @@
 
 | | Feature | Description |
 | --- | --- | --- |
-| 📦 | **Browse & Install** | Search nuget.org and private feeds, install into one or multiple projects at once |
+| 📦 | **Browse & Install** | Search nuget.org and private feeds, install into one or all selected projects at once |
 | 🔄 | **One-click Updates** | See all outdated packages with version diffs, update individually or all at once |
-| 🛡️ | **Vulnerability Scanning** | Color-coded CVE severity badges (Critical / High / Medium / Low) with advisory links |
+| 🛡️ | **Vulnerability Scanning** | Color-coded CVE severity badges (Critical / High / Medium / Low) with advisory links, including transitive packages |
+| ⚠️ | **Deprecation Warnings** | Deprecated package versions are flagged, with the reason and the suggested alternative |
+| 🧬 | **Transitive Packages** | See which packages your references pull in, and through which reference |
 | 🔀 | **Version Consolidation** | Find and fix version inconsistencies across projects in a single click |
 | 🌲 | **Project Tree** | Checkbox-based project selector — scope every operation to exactly the projects you want |
-| 🔐 | **Private Feeds** | Reads `NuGet.config`, supports Azure Artifacts Credential Provider and custom password scripts |
+| 🔐 | **Private Feeds** | Reads `NuGet.config` like NuGet does, supports the Azure Artifacts Credential Provider and custom password scripts |
 | 📌 | **CPM Support** | Full Central Package Management — detects `Directory.Packages.props`, tracks version sources |
-| ✏️ | **Inline Decorations** | Optional gutter hints in `.csproj` files showing available updates right in the editor |
+| 🔁 | **Auto-Refresh** | Picks up edits to project files, `Directory.Packages.props`, `NuGet.config` and settings (e.g. after a `git checkout`) |
+| ✏️ | **Inline Hints** | Optional hints at the end of `PackageReference` lines in project files showing available updates |
 | ⌨️ | **Keyboard Accessible** | Full keyboard navigation and ARIA support across all interactive elements |
 
 ---
@@ -114,11 +117,16 @@ Search nuget.org (or any configured feed) and install packages into your project
 - **Prerelease toggle** — include pre-release versions in results
 - **Package list** (left pane) — click any row to load full details
 - **Detail panel** (right pane) — description, authors, download count, license, tags, version picker, and per-project install/uninstall buttons
-- **Project rows** — show the currently installed version per project; install, update to a specific version, or uninstall individually
+- **Project rows** — show the currently installed version per project (labelled `CPM` or `override` when it comes from `Directory.Packages.props` or a `VersionOverride`); install, update to a specific version, or uninstall individually
+- **Bulk actions** — "Install in all", "Update all" and "Uninstall from all" apply the selected version to every shown project at once
+- **Deprecation banner** — warns when an installed version is deprecated and links to the suggested alternative
+- **Output log** — at the bottom of the view; lists every install, update and uninstall with the error reported by `dotnet` (e.g. `error NU1101: Unable to find package ...`)
 
 ### Installed
 
 Shows every package installed across all selected projects. Use this tab to quickly uninstall or change versions without leaving the package list.
+
+Check **Show transitive packages** to also list the packages your references pull in, read from `obj/project.assets.json` (restore the project first). Each one shows the direct reference that brings it in. Projects with a custom `BaseIntermediateOutputPath`, `MSBuildProjectExtensionsPath` or the artifacts output layout are not supported.
 
 ### Updates
 
@@ -141,6 +149,7 @@ Scans installed packages against the NuGet vulnerability database.
 - Affected version range shown for each entry
 - **Advisory** link opens the GitHub Security Advisory in your browser
 - Affected projects listed below each vulnerable package
+- Transitive packages are scanned too (once the project is restored) and marked with the reference that pulls them in, together with a hint how to fix them
 
 ### Consolidate
 
@@ -161,8 +170,10 @@ The collapsible project tree on the left of the main view lets you scope operati
 
 - **Check / uncheck** individual projects to include or exclude them from searches and batch operations
 - **CPM badge** displayed next to projects where `Directory.Packages.props` is detected
+- Projects with the same file name are told apart by their folder
 - Supports C# (`.csproj`), F# (`.fsproj`), and VB.NET (`.vbproj`) project files
 - Projects discovered recursively from the workspace root, excluding `node_modules`, `bin`, `obj`
+- The view refreshes by itself when project files, `Directory.Packages.props`, `Directory.Build.props`, `NuGet.config` or the extension's settings change outside of it
 
 ---
 
@@ -188,13 +199,13 @@ Open VS Code Settings (`Ctrl+,`) and search for **NuGet Workbench**, or edit `se
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
 | `NugetWorkbench.sources` | `string[]` | `[nuget.org]` | List of NuGet feed URLs to search and update from. Each entry is a JSON string `{"name":"...","url":"..."}`. |
-| `NugetWorkbench.defaultSource` | `string` | `""` | Default source URL pre-selected in the source dropdown. Empty = use the first configured source. |
+| `NugetWorkbench.defaultSource` | `string` | `""` | Source pre-selected in the source dropdown, by URL or name. Empty = search all sources. |
 | `NugetWorkbench.prerelease` | `boolean` | `false` | Include pre-release versions when checking for updates. |
 | `NugetWorkbench.skipRestore` | `boolean` | `false` | Skip the restore preview and compatibility check when installing/updating packages. |
-| `NugetWorkbench.enablePackageVersionInlineInfo` | `boolean` | `false` | Show inline gutter decorations in `.csproj` files with available update versions. |
+| `NugetWorkbench.enablePackageVersionInlineInfo` | `boolean` | `false` | Show inline hints with available update versions in project files and `Directory.Packages.props`. |
 | `NugetWorkbench.statusBarLoadingIndicator` | `boolean` | `false` | Show a loading progress indicator in the VS Code status bar. |
-| `NugetWorkbench.pageSize` | `number` | `20` | Number of packages returned per search page. |
-| `NugetWorkbench.showOutputOnError` | `boolean` | `true` | Automatically reveal the NuGet output log when an operation fails. |
+| `NugetWorkbench.pageSize` | `number` | `50` | Number of packages returned per search page (1–100). |
+| `NugetWorkbench.showOutputOnError` | `boolean` | `true` | Automatically expand the output log at the bottom of the NuGet view when an operation fails. |
 | `NugetWorkbench.logLevel` | `"DEBUG"` \| `"INFO"` \| `"WARN"` \| `"ERROR"` | `"INFO"` | Minimum log level written to the NuGet Workbench output channel. |
 
 ### Example `settings.json`
@@ -219,9 +230,9 @@ NuGet Workbench supports private package feeds out of the box.
 
 ### NuGet.config (automatic)
 
-The extension reads sources and credentials from the `NuGet.config` in your workspace root (or its `.nuget` folder) and from the user-level `NuGet.Config` (`%APPDATA%\NuGet\NuGet.Config` on Windows, `~/.nuget/NuGet/NuGet.Config` on macOS/Linux). If your feed credentials are already configured there, no extra setup is needed.
+The extension reads sources and credentials from the `NuGet.config` files the way `dotnet` does: every `NuGet.config` from a project's folder up to the root of the drive, then the user-level `NuGet.Config` (`%APPDATA%\NuGet\NuGet.Config` on Windows, `~/.nuget/NuGet/NuGet.Config` on macOS/Linux). If your feed credentials are already configured there, no extra setup is needed.
 
-The files are merged like NuGet does: the workspace file overrides sources with the same key, `<clear/>` removes the sources inherited from the user-level file, and `<disabledPackageSources>` is honored. Sources from the `NugetWorkbench.sources` setting are added on top, unless a `NuGet.config` disables or clears a source with the same name.
+The files are merged like NuGet does: a file closer to the project overrides sources with the same key, `<clear/>` removes the sources inherited from the files further up, and `<disabledPackageSources>` is honored. Searching, the Updates and Vulnerabilities tabs and the settings view use the sources of all workspace folders and all folders with their own `NuGet.config` (nested solutions, multi-root workspaces). Sources from the `NugetWorkbench.sources` setting are added on top, unless a `NuGet.config` disables or clears a source with the same name; when such a source is used to install or update a package, it is passed to `dotnet` together with the project's configured sources.
 
 ### Azure Artifacts Credential Provider
 
@@ -231,7 +242,11 @@ Install the [Microsoft Artifacts Credential Provider](https://github.com/microso
 dotnet restore --interactive
 ```
 
-The credential provider handles token refresh automatically.
+The credential provider handles token refresh automatically. NuGet Workbench uses it too: when an Azure Artifacts feed without credentials in `NuGet.config` answers with 401, the extension asks the credential provider (non-interactively) for a token and retries. Credentials from the `VSS_NUGET_EXTERNAL_FEED_ENDPOINTS` environment variable are used as well. If the provider needs a sign-in, run `dotnet restore --interactive` once.
+
+### Proxy
+
+Feed requests go through VS Code's proxy support, so `http.proxy` (including credentials in the URL), `http.noProxy` / `NO_PROXY`, PAC files, `http.proxyStrictSSL` and the system certificates apply.
 
 ### Custom Password Script
 
@@ -269,7 +284,7 @@ Enable `NugetWorkbench.enablePackageVersionInlineInfo` to see available updates 
 <PackageReference Include="Newtonsoft.Json" Version="12.0.3" />  ← 13.0.3 available
 ```
 
-Decorations appear in the gutter next to `<PackageReference>` entries whenever a newer version exists on your configured sources. Click the decoration to open the package in the NuGet panel.
+Hints appear at the end of `<PackageReference>` and `<PackageVersion>` entries whenever a newer version exists on the sources that apply to the file.
 
 ---
 
