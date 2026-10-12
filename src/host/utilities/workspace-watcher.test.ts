@@ -12,6 +12,7 @@ suite('WorkspaceWatcher Tests', () => {
     let sandbox: sinon.SinonSandbox;
     let watchers: Map<string, { create: vscode.EventEmitter<vscode.Uri>; change: vscode.EventEmitter<vscode.Uri>; delete: vscode.EventEmitter<vscode.Uri> }>;
     let configEmitter: vscode.EventEmitter<vscode.ConfigurationChangeEvent>;
+    let foldersEmitter: vscode.EventEmitter<vscode.WorkspaceFoldersChangeEvent>;
     let refreshes: RefreshKind[][];
     let watcher: WorkspaceWatcher;
     let busy: boolean;
@@ -38,6 +39,8 @@ suite('WorkspaceWatcher Tests', () => {
         });
         configEmitter = new vscode.EventEmitter<vscode.ConfigurationChangeEvent>();
         sandbox.stub(vscode.workspace, 'onDidChangeConfiguration').value(configEmitter.event);
+        foldersEmitter = new vscode.EventEmitter<vscode.WorkspaceFoldersChangeEvent>();
+        sandbox.stub(vscode.workspace, 'onDidChangeWorkspaceFolders').value(foldersEmitter.event);
         busy = false;
         sandbox.stub(TaskExecutor, 'IsBusy').get(() => busy);
         TaskExecutor.LastFinishedAt = 0;
@@ -114,5 +117,17 @@ suite('WorkspaceWatcher Tests', () => {
         configEmitter.fire(event('NugetWorkbench.sources'));
         await wait(30);
         assert.deepStrictEqual(refreshes, [['configuration']]);
+    });
+
+    test('an added or removed workspace folder refreshes everything', async () => {
+        const invalidateStub = sandbox.stub(NuGetConfigResolver, 'InvalidateWorkspaceDirs');
+        sandbox.stub(nugetApiFactory, 'ClearCache');
+        sandbox.stub(CpmResolver, 'ClearCache');
+
+        foldersEmitter.fire({ added: [], removed: [] });
+        await wait(30);
+
+        assert.ok(invalidateStub.calledOnce);
+        assert.deepStrictEqual(refreshes, [['configuration', 'projects']]);
     });
 });

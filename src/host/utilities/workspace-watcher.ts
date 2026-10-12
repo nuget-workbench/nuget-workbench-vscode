@@ -40,6 +40,11 @@ export class WorkspaceWatcher implements vscode.Disposable {
     configWatcher.onDidDelete(() => NuGetConfigResolver.InvalidateWorkspaceDirs(), undefined, this.disposables);
 
     this.disposables.push(
+      vscode.workspace.onDidChangeWorkspaceFolders(() => {
+        NuGetConfigResolver.InvalidateWorkspaceDirs();
+        this.queue("configuration");
+        this.queue("projects");
+      }),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (VIEW_SETTINGS.some((key) => e.affectsConfiguration(`NugetWorkbench.${key}`))) {
           this.queue("configuration");
