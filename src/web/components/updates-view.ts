@@ -190,6 +190,7 @@ export class UpdatesView extends LitElement {
           PackageId: p.Id,
           Version: p.LatestVersion,
           ProjectPaths: p.Projects.map((proj) => proj.Path),
+          SourceUrl: p.SourceUrl || undefined,
         })),
       });
 

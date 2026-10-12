@@ -1,7 +1,7 @@
-import axios, { AxiosError, AxiosInstance, AxiosProxyConfig, AxiosRequestConfig, AxiosResponse } from "axios";
-import * as vscode from "vscode";
+import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 import { Logger } from "../../common/logger";
 import { isPrerelease } from "../../common/version";
+import type { CredentialFallback } from "../utilities/credential-provider";
 
 type GetPackagesResponse = {
   data: Array<Package>;
@@ -26,23 +26,43 @@ export default class NuGetApi {
   private _vulnerabilityCache: { data: Map<string, VulnerabilityEntry[]>, timestamp: number } | null = null;
   private readonly _cacheTtl: number = 5 * 60 * 1000; // 5 minutes
   private readonly _vulnCacheTtl: number = 60 * 60 * 1000; // 1 hour
+  private _authHeader: string | undefined;
 
   constructor(
     private readonly _url: string,
     private readonly _username?: string,
-    private readonly _password?: string
+    private readonly _password?: string,
+    credentialFallback?: CredentialFallback
   ) {
-    this.http = axios.create({
-      proxy: this.getProxy(),
-    });
+    // VS Code's extension host routes Node's http/https through its own proxy support
+    // (http.proxy, proxy authentication, NO_PROXY, PAC, http.proxyStrictSSL, system certificates);
+    // axios' own proxy handling would bypass it
+    this.http = axios.create({ proxy: false });
     // Add Basic Auth if credentials are provided. A token-only credential (e.g. an Azure DevOps
     // PAT without a user name) is valid Basic auth with an empty user name.
     if (this._password) {
-      // btoa() throws for characters above U+00FF and encodes others as Latin-1
-      const token = Buffer.from(`${this._username ?? ""}:${this._password}`, "utf8").toString("base64");
-      this.http.interceptors.request.use((config) => {
-        config.headers["Authorization"] = `Basic ${token}`;
-        return config;
+      this._authHeader = basicAuth(this._username, this._password);
+    }
+    this.http.interceptors.request.use((config) => {
+      if (this._authHeader) config.headers["Authorization"] = this._authHeader;
+      return config;
+    });
+
+    if (credentialFallback) {
+      this.http.interceptors.response.use(undefined, async (error: unknown) => {
+        const config = (error as AxiosError).config as (InternalAxiosRequestConfig & { _credentialRetry?: boolean }) | undefined;
+        if (!(error instanceof AxiosError) || error.response?.status !== 401 || !config) throw error;
+        if (config._credentialRetry) {
+          // The credentials from the fallback were rejected as well; ask again next time
+          credentialFallback.Invalidate(this._url);
+          throw error;
+        }
+        const credentials = await credentialFallback.GetCredentials(this._url);
+        if (!credentials) throw error;
+        Logger.info(`NuGetApi: Retrying ${config.url} with credentials from the credential provider`);
+        this._authHeader = basicAuth(credentials.Username, credentials.Password);
+        config._credentialRetry = true;
+        return this.http.request(config);
       });
     }
   }
@@ -350,28 +370,9 @@ export default class NuGetApi {
     // axios rejects with an AxiosError for failed requests; callers format it with the status/URL
     return await this.http.get(url, config);
   }
+}
 
-  private getProxy(): AxiosProxyConfig | undefined {
-    let proxy: string | undefined = vscode.workspace.getConfiguration().get("http.proxy");
-    if (proxy === "" || proxy == undefined) {
-      proxy =
-        process.env["HTTPS_PROXY"] ??
-        process.env["https_proxy"] ??
-        process.env["HTTP_PROXY"] ??
-        process.env["http_proxy"];
-    }
-
-    if (proxy && proxy !== "") {
-      const proxy_url = new URL(proxy);
-
-      Logger.info(`NuGetApi.getProxy: Found proxy: ${proxy}`);
-
-      return {
-        host: proxy_url.hostname,
-        port: Number(proxy_url.port),
-      };
-    } else {
-      return undefined;
-    }
-  }
+function basicAuth(username: string | undefined, password: string): string {
+  // btoa() throws for characters above U+00FF and encodes others as Latin-1
+  return `Basic ${Buffer.from(`${username ?? ""}:${password}`, "utf8").toString("base64")}`;
 }

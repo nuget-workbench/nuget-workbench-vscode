@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { Logger } from '../../common/logger';
 import NuGetConfigResolver from './nuget-config-resolver';
 import nugetApiFactory from '../nuget/api-factory';
@@ -168,9 +169,9 @@ export class PackageVersionDecorator implements vscode.Disposable {
         Logger.debug(`PackageVersionDecorator.fetchAndDecorate: Fetching versions for ${Array.from(packageIds).join(', ')}`);
         const decorations: vscode.DecorationOptions[] = [];
 
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        // The feeds that apply to the open project file, like dotnet restore would use them
         const sources = packageIds.size > 0
-            ? await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot)
+            ? await NuGetConfigResolver.GetSourcesAndDecodePasswords(path.dirname(editor.document.fileName))
             : [];
 
         const promises = Array.from(packageIds).map(async (packageId) => {

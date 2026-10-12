@@ -4,15 +4,14 @@ import * as vscode from 'vscode';
 import nugetApiFactory from './api-factory';
 import NuGetConfigResolver from '../utilities/nuget-config-resolver';
 import PasswordScriptExecutor from '../utilities/password-script-executor';
+import CredentialProvider from '../utilities/credential-provider';
 import { Logger } from '../../common/logger';
 
 suite('NuGetApiFactory Tests', () => {
     let sandbox: sinon.SinonSandbox;
     let getSourcesStub: sinon.SinonStub;
-    let workspaceFoldersStub: sinon.SinonStub;
     let loggerDebugStub: sinon.SinonStub;
     let loggerInfoStub: sinon.SinonStub;
-    let loggerWarnStub: sinon.SinonStub;
     let clearPasswordCacheStub: sinon.SinonStub;
 
     setup(() => {
@@ -22,16 +21,16 @@ suite('NuGetApiFactory Tests', () => {
         nugetApiFactory.ClearCache();
 
         // Mock dependencies
-        getSourcesStub = sandbox.stub(NuGetConfigResolver, 'GetSourcesAndDecodePasswords');
+        getSourcesStub = sandbox.stub(NuGetConfigResolver, 'GetWorkspaceSources');
         getSourcesStub.resolves([]);
 
-        workspaceFoldersStub = sandbox.stub(vscode.workspace, 'workspaceFolders').value([
+        sandbox.stub(vscode.workspace, 'workspaceFolders').value([
             { uri: { fsPath: '/workspace' } }
         ]);
 
         loggerDebugStub = sandbox.stub(Logger, 'debug');
         loggerInfoStub = sandbox.stub(Logger, 'info');
-        loggerWarnStub = sandbox.stub(Logger, 'warn');
+        sandbox.stub(Logger, 'warn');
 
         clearPasswordCacheStub = sandbox.stub(PasswordScriptExecutor, 'ClearCache');
     });
@@ -96,32 +95,46 @@ suite('NuGetApiFactory Tests', () => {
                 }
             ]);
 
-            await nugetApiFactory.GetSourceApi('https://api.nuget.org');
+            const api = await nugetApiFactory.GetSourceApi('https://api.nuget.org');
 
-            assert.ok(loggerWarnStub.calledWith(sinon.match(/No credentials found/)));
+            assert.ok(loggerDebugStub.calledWith(sinon.match(/No credentials in nuget.config/)));
+            // Feeds without credentials ask the credential provider on a 401
+            assert.ok((api as any).http.interceptors.response.handlers.some((h: unknown) => h));
         });
 
-        test('should use workspace root when available', async () => {
-            workspaceFoldersStub = sandbox.stub(vscode.workspace, 'workspaceFolders').value([
-                { uri: { fsPath: '/my/workspace' } }
-            ]);
-
-            getSourcesStub.resolves([]);
-
+        test('should resolve credentials from the sources of the whole workspace', async () => {
             await nugetApiFactory.GetSourceApi('https://api.nuget.org');
 
-            assert.ok(getSourcesStub.calledWith('/my/workspace'));
+            assert.ok(getSourcesStub.calledWith(true));
         });
 
-        test('should handle undefined workspace folders', async () => {
-            sandbox.stub(vscode.workspace, 'workspaceFolders').value(undefined);
+        test('should share one instance between concurrent calls', async () => {
+            let release!: (v: unknown[]) => void;
+            getSourcesStub.returns(new Promise((resolve) => (release = resolve)));
 
-            getSourcesStub.resolves([]);
+            const first = nugetApiFactory.GetSourceApi('https://api.nuget.org');
+            const second = nugetApiFactory.GetSourceApi('https://api.nuget.org');
+            release([]);
 
+            assert.strictEqual(await first, await second);
+            assert.strictEqual(getSourcesStub.callCount, 1);
+        });
+
+        test('should treat URLs differing in trailing slash or case as one feed', async () => {
+            const api1 = await nugetApiFactory.GetSourceApi('https://Private.nuget.org/v3/index.json/');
+            const api2 = await nugetApiFactory.GetSourceApi('https://private.nuget.org/v3/index.json');
+
+            assert.strictEqual(api1, api2);
+        });
+
+        test('should not cache a failed creation', async () => {
+            getSourcesStub.onFirstCall().rejects(new Error('script failed'));
+            getSourcesStub.onSecondCall().resolves([]);
+
+            await assert.rejects(nugetApiFactory.GetSourceApi('https://api.nuget.org'));
             const api = await nugetApiFactory.GetSourceApi('https://api.nuget.org');
 
             assert.ok(api);
-            assert.ok(getSourcesStub.calledWith(undefined));
         });
 
         test('should handle empty workspace folders array', async () => {
@@ -200,10 +213,21 @@ suite('NuGetApiFactory Tests', () => {
             assert.ok(!loggerDebugStub.calledWith(sinon.match(/Returning cached/)));
         });
 
-        test('should clear password cache', () => {
+        test('should keep decoded passwords', () => {
             nugetApiFactory.ClearCache();
 
+            assert.ok(clearPasswordCacheStub.notCalled);
+        });
+
+        test('ClearCredentials should also clear passwords, provider tokens and the config cache', () => {
+            const providerStub = sandbox.stub(CredentialProvider, 'ClearCache');
+            const resolverStub = sandbox.stub(NuGetConfigResolver, 'ClearCache');
+
+            nugetApiFactory.ClearCredentials();
+
             assert.ok(clearPasswordCacheStub.calledOnce);
+            assert.ok(providerStub.calledOnce);
+            assert.ok(resolverStub.calledOnce);
         });
 
         test('should call ClearPackageCache on each API instance', async () => {
@@ -217,6 +241,7 @@ suite('NuGetApiFactory Tests', () => {
             const clearCache2 = sandbox.stub(api2, 'ClearPackageCache');
 
             nugetApiFactory.ClearCache();
+            await new Promise((resolve) => setImmediate(resolve));
 
             assert.ok(clearCache1.calledOnce);
             assert.ok(clearCache2.calledOnce);

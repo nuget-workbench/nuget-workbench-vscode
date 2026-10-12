@@ -721,51 +721,10 @@ suite('NuGetApi Tests', () => {
     });
 
     suite('Proxy Configuration', () => {
-        test('should use proxy from vscode configuration', () => {
-            sandbox.restore();
-            sandbox = sinon.createSandbox();
-            
-            sandbox.stub(Logger, 'debug');
-            sandbox.stub(Logger, 'info');
-            sandbox.stub(Logger, 'error');
-
-            sandbox.stub(vscode.workspace, 'getConfiguration').returns({
-                get: sandbox.stub().withArgs('http.proxy').returns('http://proxy.example.com:8080')
-            } as any);
-
+        test('should leave proxies to the proxy support of VS Code', () => {
             const api = new NuGetApi('https://api.nuget.org/v3/index.json');
 
-            // The proxy is configured in constructor, we can check the http instance
-            assert.ok(api);
-        });
-
-        test('should use environment variable proxy when vscode config not set', () => {
-            sandbox.restore();
-            sandbox = sinon.createSandbox();
-            
-            sandbox.stub(Logger, 'debug');
-            sandbox.stub(Logger, 'info');
-            sandbox.stub(Logger, 'error');
-            
-            sandbox.stub(vscode.workspace, 'getConfiguration').returns({
-                get: sandbox.stub().returns(undefined)
-            } as any);
-
-            // Set environment variable
-            const originalEnv = process.env.HTTPS_PROXY;
-            process.env.HTTPS_PROXY = 'http://env-proxy:3128';
-
-            try {
-                const api = new NuGetApi('https://api.nuget.org/v3/index.json');
-                assert.ok(api);
-            } finally {
-                // Restore environment
-                if (originalEnv) {
-                    process.env.HTTPS_PROXY = originalEnv;
-                } else {
-                    delete process.env.HTTPS_PROXY;
-                }
-            }
+            assert.strictEqual((api as any).http.defaults.proxy, false);
         });
     });
 
@@ -787,6 +746,86 @@ suite('NuGetApi Tests', () => {
             const api = new NuGetApi('https://api.nuget.org/v3/index.json');
             assert.ok(api);
             // No error means interceptor wasn't set up for auth
+        });
+
+        // Answers requests through a fake adapter, so the interceptors run
+        function useAdapter(api: NuGetApi, handler: (config: any) => number) {
+            const seen: any[] = [];
+            (api as any).http.defaults.adapter = async (config: any) => {
+                seen.push(config);
+                const status = handler(config);
+                const response = { data: {}, status, statusText: '', headers: {}, config };
+                if (status >= 400) {
+                    throw new AxiosError('Request failed', 'ERR_BAD_REQUEST', config, null, response as any);
+                }
+                return response;
+            };
+            return seen;
+        }
+
+        const tokenHeader = `Basic ${Buffer.from('VssSessionToken:secret').toString('base64')}`;
+
+        test('should send Basic auth built from the credentials', async () => {
+            const api = new NuGetApi('https://private.nuget.org', 'user', 'pässword');
+            const seen = useAdapter(api, () => 200);
+
+            await (api as any).http.get('https://private.nuget.org/v3/index.json');
+
+            assert.strictEqual(
+                seen[0].headers.Authorization,
+                `Basic ${Buffer.from('user:pässword', 'utf8').toString('base64')}`
+            );
+        });
+
+        test('should retry a 401 once with credentials from the fallback', async () => {
+            const fallback = {
+                GetCredentials: sandbox.stub().resolves({ Username: 'VssSessionToken', Password: 'secret' }),
+                Invalidate: sandbox.stub(),
+            };
+            const api = new NuGetApi('https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json', undefined, undefined, fallback);
+            const seen = useAdapter(api, (config) => (config.headers.Authorization === tokenHeader ? 200 : 401));
+
+            const response = await (api as any).http.get('https://pkgs.dev.azure.com/org/_packaging/feed/nuget/v3/index.json');
+            await (api as any).http.get('https://pkgs.dev.azure.com/org/query');
+
+            assert.strictEqual(response.status, 200);
+            assert.strictEqual(fallback.GetCredentials.callCount, 1);
+            assert.strictEqual(seen.length, 3, 'one rejected request, its retry, and a request that reuses the token');
+            assert.strictEqual(seen[2].headers.Authorization, tokenHeader);
+        });
+
+        test('should not loop when the fallback credentials are rejected too', async () => {
+            const fallback = {
+                GetCredentials: sandbox.stub().resolves({ Username: 'VssSessionToken', Password: 'secret' }),
+                Invalidate: sandbox.stub(),
+            };
+            const api = new NuGetApi('https://pkgs.dev.azure.com/feed', undefined, undefined, fallback);
+            const seen = useAdapter(api, () => 401);
+
+            await assert.rejects((api as any).http.get('https://pkgs.dev.azure.com/feed'), (err: AxiosError) => err.response?.status === 401);
+
+            assert.strictEqual(seen.length, 2);
+            assert.ok(fallback.Invalidate.calledOnceWith('https://pkgs.dev.azure.com/feed'));
+        });
+
+        test('should rethrow a 401 when the fallback has no credentials', async () => {
+            const fallback = { GetCredentials: sandbox.stub().resolves(undefined), Invalidate: sandbox.stub() };
+            const api = new NuGetApi('https://private.nuget.org', undefined, undefined, fallback);
+            const seen = useAdapter(api, () => 401);
+
+            await assert.rejects((api as any).http.get('https://private.nuget.org/index.json'));
+
+            assert.strictEqual(seen.length, 1);
+        });
+
+        test('should not ask the fallback for other errors', async () => {
+            const fallback = { GetCredentials: sandbox.stub().resolves(undefined), Invalidate: sandbox.stub() };
+            const api = new NuGetApi('https://private.nuget.org', undefined, undefined, fallback);
+            useAdapter(api, () => 500);
+
+            await assert.rejects((api as any).http.get('https://private.nuget.org/index.json'));
+
+            assert.ok(fallback.GetCredentials.notCalled);
         });
     });
 });

@@ -77,6 +77,8 @@ export type BatchUpdateRequest = {
     PackageId: string;
     Version: string;
     ProjectPaths: string[];
+    /** Feed the version was found in. */
+    SourceUrl?: string;
   }>;
 };
 
@@ -84,6 +86,7 @@ export type ConsolidateRequest = {
   PackageId: string;
   TargetVersion: string;
   ProjectPaths: string[];
+  SourceUrl?: string;
 };
 
 export type UpdateConfigurationRequest = {
