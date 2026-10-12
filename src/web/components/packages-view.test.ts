@@ -251,6 +251,20 @@ suite('PackagesView Component', () => {
         });
     });
 
+    suite('RefreshFromWorkspace', () => {
+        test('reloads the projects without fetching every package again', async () => {
+            const getProjects = mockHostApi.getProjects as sinon.SinonStub;
+            getProjects.resetHistory();
+            getProjects.resolves(ok({ Projects: [createMockProject('Project1', [{ Id: 'Pkg1', Version: '1.0.0' }])] }));
+
+            await packagesView.RefreshFromWorkspace();
+
+            assert.ok(getProjects.calledOnce);
+            assert.strictEqual(getProjects.firstCall.args[0].ForceReload, false);
+            assert.strictEqual(packagesView.projects.length, 1);
+        });
+    });
+
     suite('LoadProjects', () => {
         test('should call mediator with correct parameters', async () => {
             (mockHostApi.getProjects as sinon.SinonStub).resolves(ok({ Projects: [] }));

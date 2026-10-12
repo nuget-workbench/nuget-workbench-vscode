@@ -681,6 +681,15 @@ export class PackagesView extends LitElement {
     this.reloadChildViews();
   }
 
+  /** Project files were changed outside the view (checkout, manual edit). */
+  async RefreshFromWorkspace(): Promise<void> {
+    // No forced reload: the host already dropped its project caches, and forcing would fetch
+    // every installed package from the feeds again
+    await this.LoadProjects();
+    this.resetChildCounts();
+    this.reloadChildViews();
+  }
+
   /** Called when the Updates or Consolidate tab changed project files. */
   private async OnChildViewChangedProjects(source: Element): Promise<void> {
     await this.LoadProjects(true);

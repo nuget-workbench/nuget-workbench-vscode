@@ -78,13 +78,25 @@ export class SearchBar extends LitElement {
     super.connectedCallback();
     this.selectedSourceUrl = "";
     this.prerelease = configuration.Configuration?.Prerelease ?? false;
+    configuration.addEventListener("configuration-changed", this.onConfigurationChanged);
     this.emitFilterChangedEvent();
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.delayedPackagesLoader.cancel();
+    configuration.removeEventListener("configuration-changed", this.onConfigurationChanged);
   }
+
+  /** Sources can change outside the view (settings.json, nuget.config). */
+  private onConfigurationChanged = (): void => {
+    const sources = configuration.Configuration?.Sources ?? [];
+    if (this.selectedSourceUrl && !sources.some((s) => s.Url === this.selectedSourceUrl)) {
+      this.selectedSourceUrl = "";
+      this.emitFilterChangedEvent();
+    }
+    this.requestUpdate();
+  };
 
   private async prereleaseChangedEvent(target: EventTarget): Promise<void> {
     this.prerelease = (target as HTMLInputElement).checked;

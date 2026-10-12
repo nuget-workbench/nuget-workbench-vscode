@@ -10,6 +10,12 @@ export class TaskExecutor {
   // mutex; it must not be taken for the end of the next task, which has the same name/source.
   private lastTask: vscode.Task | undefined;
   private lastExecution: vscode.TaskExecution | undefined;
+  /** When the last dotnet run ended; its file changes are not reported as external edits. */
+  LastFinishedAt = 0;
+
+  get IsBusy(): boolean {
+    return this.globalMutex.isLocked();
+  }
 
   async ExecuteTask(task: vscode.Task): Promise<void> {
     Logger.info(`TaskExecutor.ExecuteTask: Executing task ${task.name}`);
@@ -73,6 +79,7 @@ export class TaskExecutor {
       disposables.forEach((d) => d.dispose());
       this.lastTask = task;
       this.lastExecution = execution;
+      this.LastFinishedAt = Date.now();
       releaser();
     }
   }
