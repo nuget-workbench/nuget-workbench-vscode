@@ -16,11 +16,13 @@ import type { UpdatesView } from "./updates-view";
 import type { ConsolidateView } from "./consolidate-view";
 import type { VulnerabilitiesView } from "./vulnerabilities-view";
 import type { DropdownOption } from "./dropdown";
+import type { NugetOutputLog } from "./nuget-output-log";
+import { canChangeVersion, type ProjectOperation, type ProjectRow } from "./project-row";
+import type { OperationLogDetail } from "../operation-log";
 import "./dropdown";
 
 type TabId = "browse" | "installed" | "updates" | "consolidate" | "vulnerabilities";
 
-const PACKAGE_FETCH_TAKE = 50;
 const PACKAGE_CONTAINER_SCROLL_MARGIN = 196;
 const NUGET_ORG_PREFIX = "https://api.nuget.org";
 
@@ -270,6 +272,20 @@ export class PackagesView extends LitElement {
             overflow-y: auto;
             overflow-x: hidden;
 
+            .bulk-actions {
+              display: flex;
+              flex-wrap: wrap;
+              align-items: center;
+              gap: 6px;
+              padding: 0 6px 6px;
+
+              button {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+              }
+            }
+
             .no-projects {
               display: flex;
               gap: 4px;
@@ -288,7 +304,8 @@ export class PackagesView extends LitElement {
   ];
 
   private splitter: Split.Instance | null = null;
-  packagesPage: number = 0;
+  // Results already loaded; the page size setting may change between pages
+  packagesSkip: number = 0;
   @state() packagesLoadingInProgress: boolean = false;
   private loadPackagesSeq = 0;
   private loadProjectsSeq = 0;
@@ -313,12 +330,14 @@ export class PackagesView extends LitElement {
   @state() packagesLoadingErrorMessage: string = "";
   @state() selectedProjectPaths: string[] = [];
   @state() showProjectTree: boolean = false;
+  @state() bulkRunning: boolean = false;
 
   connectedCallback(): void {
     super.connectedCallback();
     this.filters = {
       ...this.filters,
-      SourceUrl: "",
+      // Same value as the search bar, so its first filter event is not taken for a source change
+      SourceUrl: configuration.DefaultSourceUrl,
       Prerelease: configuration.Configuration?.Prerelease ?? false,
     };
     // LoadPackages is triggered by search-bar's connectedCallback emitting filter-changed
@@ -830,8 +849,8 @@ export class PackagesView extends LitElement {
       SourceName: this.CurrentSource?.Name,
       Filter: this.filters.Query,
       Prerelease: this.filters.Prerelease,
-      Skip: this.packagesPage * PACKAGE_FETCH_TAKE,
-      Take: PACKAGE_FETCH_TAKE,
+      Skip: this.packagesSkip,
+      Take: configuration.Configuration?.PageSize ?? 50,
       PasswordScriptPath: this.CurrentSource?.PasswordScriptPath,
       ForceReload: forceReload,
     });
@@ -840,7 +859,7 @@ export class PackagesView extends LitElement {
     this.packagesLoadingInProgress = true;
 
     if (!append) {
-      this.packagesPage = 0;
+      this.packagesSkip = 0;
       // Only drop the details pane when it shows a browse result that is about to disappear
       if (this.selectedPackage && this.packages.includes(this.selectedPackage)) {
         this.selectedPackage = null;
@@ -877,7 +896,7 @@ export class PackagesView extends LitElement {
       const known = new Set(this.packages.map((p) => p.Name.toLowerCase()));
       const added = packagesViewModels.filter((p) => !known.has(p.Name.toLowerCase()));
       this.packages = [...this.packages, ...added];
-      this.packagesPage++;
+      this.packagesSkip += requestObject.Take;
       this.packagesLoadingInProgress = false;
     }
   }
@@ -1034,6 +1053,102 @@ export class PackagesView extends LitElement {
     return url;
   }
 
+  private addLogEntry(detail: OperationLogDetail): void {
+    const log = this.shadowRoot?.querySelector("nuget-output-log") as NugetOutputLog | null;
+    log?.addEntry(detail.text, detail.level);
+  }
+
+  /** Projects of the details pane that a bulk action would change. */
+  bulkTargets(type: ProjectOperation): ProjectViewModel[] {
+    const id = this.selectedPackage?.Name.toLowerCase();
+    if (!id) return [];
+    const target = this.selectedVersion;
+    return this.filteredProjects.filter((project) => {
+      const installed = project.Packages.find((p) => p.Id.toLowerCase() === id);
+      if (type === "INSTALL") return !installed;
+      if (type === "UNINSTALL") return !!installed;
+      return !!installed && canChangeVersion(installed, target);
+    });
+  }
+
+  /** Runs one operation for every project it applies to, one project after the other. */
+  async RunBulk(type: ProjectOperation): Promise<void> {
+    if (this.bulkRunning) return;
+    const pkg = this.selectedPackage;
+    const version = this.selectedVersion;
+    const initialTargets = this.bulkTargets(type);
+    if (!pkg || initialTargets.length === 0) return;
+
+    if (type === "UNINSTALL") {
+      const answer = await hostApi.showConfirmation({
+        Message: `Uninstall ${pkg.Name} from ${initialTargets.length} project${initialTargets.length !== 1 ? "s" : ""}?`,
+        Detail: initialTargets.map((p) => p.Name).join("\n"),
+      });
+      if (!answer.ok || !answer.value.Confirmed) return;
+    }
+
+    this.bulkRunning = true;
+    const tried = new Set<string>();
+    let failed = 0;
+    try {
+      for (;;) {
+        // The user picked another package or version: stop instead of applying the old choice
+        if (this.selectedPackage !== pkg || this.selectedVersion !== version) break;
+        // Recomputed every round: a CPM update also changes the projects sharing its Directory.Packages.props
+        const next = this.bulkTargets(type).find((p) => !tried.has(p.Path));
+        if (!next) break;
+        tried.add(next.Path);
+
+        await this.updateComplete;
+        const row = Array.from(this.shadowRoot?.querySelectorAll("project-row") ?? []).find(
+          (r) => (r as ProjectRow).project?.Path === next.Path
+        ) as ProjectRow | undefined;
+        const result = row ? await row.run(type, { confirm: false, notify: false }) : null;
+        if (!result) {
+          failed++;
+        } else if (result.IsCpmEnabled) {
+          await this.LoadProjects();
+        }
+      }
+    } finally {
+      this.bulkRunning = false;
+    }
+
+    if (failed > 0) {
+      this.addLogEntry({ text: `${failed} of ${tried.size} project${tried.size !== 1 ? "s" : ""} failed`, level: "error" });
+    }
+    await this.LoadProjects();
+    this.resetChildCounts();
+    this.reloadChildViews();
+  }
+
+  private renderBulkActions(): unknown {
+    if (this.filteredProjects.length < 2) return nothing;
+    const actions: Array<{ type: ProjectOperation; label: string; icon: string }> = [
+      { type: "INSTALL", label: "Install in all", icon: "codicon-diff-added" },
+      { type: "UPDATE", label: "Update all", icon: "codicon-arrow-circle-up" },
+      { type: "UNINSTALL", label: "Uninstall from all", icon: "codicon-diff-removed" },
+    ];
+    const buttons = actions
+      .map((action) => ({ ...action, count: this.bulkTargets(action.type).length }))
+      .filter((action) => action.count > 0);
+    if (buttons.length === 0) return nothing;
+
+    return html`<div class="bulk-actions" role="toolbar" aria-label="Actions for all projects">
+      ${buttons.map(
+        (action) => html`<button
+          class="secondary-btn"
+          ?disabled=${this.bulkRunning}
+          title="${action.label} ${action.count} project${action.count !== 1 ? "s" : ""}"
+          @click=${() => this.RunBulk(action.type)}
+        >
+          <span class="codicon ${action.icon}"></span> ${action.label} (${action.count})
+        </button>`
+      )}
+      ${this.bulkRunning ? html`<span class="spinner medium" role="status" aria-label="Running"></span>` : nothing}
+    </div>`;
+  }
+
   private renderDetailedPackage(): unknown {
     const sourceName = this.selectedSourceName;
 
@@ -1082,6 +1197,7 @@ export class PackagesView extends LitElement {
         </div>
       </div>
       <div class="projects-panel-container">
+        ${this.renderBulkActions()}
         ${this.filteredProjects.length > 0
           ? repeat(
               this.filteredProjects,
@@ -1143,7 +1259,7 @@ export class PackagesView extends LitElement {
 
   render(): unknown {
     return html`
-      <div class="container">
+      <div class="container" @operation-log=${(e: CustomEvent<OperationLogDetail>) => this.addLogEntry(e.detail)}>
         ${this.showProjectTree
           ? html`<div class="col" id="project-tree">
               <project-tree
@@ -1267,8 +1383,7 @@ export class PackagesView extends LitElement {
           ${this.renderSelectedPackagePanel()}
         </div>
       </div>
-      <nuget-output-log></nuget-output-log>
-      <nuget-license-dialog></nuget-license-dialog>
+      <nuget-output-log .expandOnError=${configuration.Configuration?.ShowOutputOnError ?? true}></nuget-output-log>
     `;
   }
 }

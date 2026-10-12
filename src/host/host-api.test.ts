@@ -87,7 +87,7 @@ suite('HostAPI Tests', () => {
             sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([
                 { Name: 'nuget.org', Url: 'https://api.nuget.org/v3/index.json' },
             ]);
-            const runStub = sandbox.stub(TaskExecutor, 'ExecuteTask').resolves();
+            const runStub = sandbox.stub(TaskExecutor, 'ExecuteDotnet').resolves();
 
             const result = await createHostAPI().batchUpdatePackages({
                 Updates: [{
@@ -99,7 +99,7 @@ suite('HostAPI Tests', () => {
             });
 
             assert.ok(result.ok && result.value.Results[0].Success);
-            const args = (runStub.firstCall.args[0].execution as vscode.ProcessExecution).args;
+            const args: string[] = runStub.firstCall.args[1];
             assert.deepStrictEqual(args.slice(0, 6), ['add', '/repo/App/App.csproj', 'package', 'Company.Lib', '--version', '2.0.0']);
             assert.deepStrictEqual(args.slice(6), [
                 '-s', 'https://settings-only/v3/index.json',

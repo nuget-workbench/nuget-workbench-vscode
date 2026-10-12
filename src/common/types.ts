@@ -65,6 +65,12 @@ type Configuration = {
   Prerelease: boolean;
   Sources: Array<Source>;
   StatusBarLoadingIndicator: boolean;
+  /** Search results per page. Read-only in the UI. */
+  PageSize?: number;
+  /** Source URL or name preselected in the source dropdown; empty means all sources. Read-only in the UI. */
+  DefaultSource?: string;
+  /** Expand the output log when an operation fails. Read-only in the UI. */
+  ShowOutputOnError?: boolean;
 };
 
 type OutdatedPackage = {

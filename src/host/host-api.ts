@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as path from "path";
 import type {
   HostAPI,
   GetProjectsRequest,
@@ -321,6 +322,9 @@ export function createHostAPI(): HostAPI {
           Prerelease: config.get("prerelease") ?? false,
           Sources: sources,
           StatusBarLoadingIndicator: config.get("statusBarLoadingIndicator") ?? false,
+          PageSize: Math.min(100, Math.max(1, Math.round(config.get<number>("pageSize") ?? 50))),
+          DefaultSource: config.get<string>("defaultSource") ?? "",
+          ShowOutputOnError: config.get<boolean>("showOutputOnError") ?? true,
         },
       });
     },
@@ -781,18 +785,7 @@ export function createHostAPI(): HostAPI {
 async function executeRemovePackage(packageId: string, projectPath: string): Promise<void> {
   StatusBarUtils.ShowText(`Removing package ${packageId}...`);
   const args = ["remove", projectPath, "package", packageId];
-
-  const task = new vscode.Task(
-    { type: "dotnet", task: "dotnet remove package" },
-    vscode.TaskScope.Workspace,
-    "nuget-workbench",
-    "dotnet",
-    // ProcessExecution runs dotnet without a shell, so paths with "&", "(", "$" or quotes
-    // and values from the feed are passed verbatim instead of being interpreted by the shell
-    new vscode.ProcessExecution("dotnet", args)
-  );
-  task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
-  await TaskExecutor.ExecuteTask(task);
+  await TaskExecutor.ExecuteDotnet("dotnet remove package", args, path.dirname(projectPath));
 }
 
 async function executeAddPackage(
@@ -813,15 +806,8 @@ async function executeAddPackage(
   }
   args.push(...sourceArgs);
 
-  const task = new vscode.Task(
-    { type: "dotnet", task: "dotnet add package" },
-    vscode.TaskScope.Workspace,
-    "nuget-workbench",
-    "dotnet",
-    new vscode.ProcessExecution("dotnet", args)
-  );
-  task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
-  await TaskExecutor.ExecuteTask(task);
+  // Run from the project folder, so the restore finds the same nuget.config files as the project
+  await TaskExecutor.ExecuteDotnet("dotnet add package", args, path.dirname(projectPath));
 }
 
 /**

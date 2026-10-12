@@ -1,5 +1,5 @@
 import { LitElement, css, html, nothing } from "lit";
-import { customElement, state } from "lit/decorators.js";
+import { customElement, property, state } from "lit/decorators.js";
 import codicon from "@/web/styles/codicon.css";
 
 export type LogEntry = {
@@ -110,17 +110,20 @@ export class NugetOutputLog extends LitElement {
     `,
   ];
 
+  /** Expand the log when an error is added ("showOutputOnError" setting). */
+  @property({ type: Boolean }) expandOnError: boolean = true;
   @state() entries: LogEntry[] = [];
   @state() isExpanded: boolean = false;
   @state() isRunning: boolean = false;
   @state() progress: number = 0;
 
   addEntry(text: string, level: LogEntry["level"] = "info"): void {
+    // Long sessions keep only the latest entries
     this.entries = [
-      ...this.entries,
+      ...this.entries.slice(-199),
       { text, level, timestamp: Date.now() },
     ];
-    if (level === "error") {
+    if (level === "error" && this.expandOnError) {
       this.isExpanded = true;
     }
     this.updateComplete.then(() => {

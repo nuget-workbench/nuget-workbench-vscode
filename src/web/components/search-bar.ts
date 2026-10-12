@@ -76,7 +76,7 @@ export class SearchBar extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.selectedSourceUrl = "";
+    this.selectedSourceUrl = configuration.DefaultSourceUrl;
     this.prerelease = configuration.Configuration?.Prerelease ?? false;
     configuration.addEventListener("configuration-changed", this.onConfigurationChanged);
     this.emitFilterChangedEvent();
@@ -110,13 +110,7 @@ export class SearchBar extends LitElement {
     if (!config) return;
 
     await hostApi.updateConfiguration({
-      Configuration: {
-        SkipRestore: config.SkipRestore,
-        EnablePackageVersionInlineInfo: config.EnablePackageVersionInlineInfo,
-        Prerelease: this.prerelease,
-        Sources: config.Sources,
-        StatusBarLoadingIndicator: config.StatusBarLoadingIndicator,
-      },
+      Configuration: { ...config, Prerelease: this.prerelease },
     });
     await configuration.Reload();
   }

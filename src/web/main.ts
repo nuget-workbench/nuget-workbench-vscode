@@ -15,7 +15,6 @@ import "./components/consolidate-view";
 import "./components/vulnerabilities-view";
 import "./components/project-tree";
 import "./components/nuget-output-log";
-import "./components/nuget-license-dialog";
 
 import "./main.css";
 

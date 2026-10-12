@@ -1,15 +1,10 @@
 import { Mutex } from "async-mutex";
 import * as vscode from "vscode";
 import { Logger } from "../../common/logger";
-
-type TaskEnd = { kind: "process"; exitCode: number | undefined } | { kind: "task" };
+import { DotnetPseudoterminal, extractDotnetErrors } from "./dotnet-runner";
 
 export class TaskExecutor {
   private globalMutex: Mutex = new Mutex();
-  // The previous task's onDidEndTask event can arrive after its process end already released the
-  // mutex; it must not be taken for the end of the next task, which has the same name/source.
-  private lastTask: vscode.Task | undefined;
-  private lastExecution: vscode.TaskExecution | undefined;
   /** When the last dotnet run ended; its file changes are not reported as external edits. */
   LastFinishedAt = 0;
 
@@ -17,68 +12,59 @@ export class TaskExecutor {
     return this.globalMutex.isLocked();
   }
 
-  async ExecuteTask(task: vscode.Task): Promise<void> {
-    Logger.info(`TaskExecutor.ExecuteTask: Executing task ${task.name}`);
-
-    // Log task details if available
-    if (task.execution instanceof vscode.ShellExecution) {
-      const shellExec = task.execution as vscode.ShellExecution;
-      const args = typeof shellExec.args === 'string' ? shellExec.args : (shellExec.args || []).map(a => typeof a === 'string' ? a : a.value).join(' ');
-      Logger.debug(`TaskExecutor.ExecuteTask: Shell command: ${shellExec.commandLine || shellExec.command} ${args}`);
-    } else if (task.execution instanceof vscode.ProcessExecution) {
-      const procExec = task.execution as vscode.ProcessExecution;
-      Logger.debug(`TaskExecutor.ExecuteTask: Process: ${procExec.process} ${(procExec.args || []).join(' ')}`);
-    }
+  /**
+   * Runs dotnet as a task, one at a time: dotnet commands on the same projects must not overlap.
+   * Throws with the errors from dotnet's output when it fails.
+   */
+  async ExecuteDotnet(name: string, args: string[], cwd?: string): Promise<void> {
+    Logger.info(`TaskExecutor.ExecuteDotnet: Executing task ${name}`);
+    Logger.debug(`TaskExecutor.ExecuteDotnet: dotnet ${args.join(" ")}`);
 
     const releaser = await this.globalMutex.acquire();
     const disposables: vscode.Disposable[] = [];
-    let execution: vscode.TaskExecution | undefined;
     try {
-      const started: { execution?: vscode.TaskExecution } = {};
-      // Tasks are serialized by the global mutex, so an end event for a task with the same
-      // name/source that arrives before executeTask() resolves belongs to this execution.
-      const isOwnExecution = (e: vscode.TaskExecution) => {
-        if (started.execution) {
-          return e === started.execution || e.task === started.execution.task;
-        }
-        if (e === this.lastExecution || (this.lastTask && e.task === this.lastTask)) {
-          return false;
-        }
-        return e.task.name === task.name && e.task.source === task.source;
-      };
+      const pty = new DotnetPseudoterminal(args, cwd);
+      const task = new vscode.Task(
+        { type: "dotnet", task: name },
+        vscode.TaskScope.Workspace,
+        "nuget-workbench",
+        "dotnet",
+        new vscode.CustomExecution(async () => pty)
+      );
+      task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
 
-      // Subscribe before starting the task so fast-finishing tasks are not missed.
-      // onDidEndTaskProcess carries the exit code; onDidEndTask is a fallback for tasks
-      // whose process never started. The first event to arrive wins.
-      const finished = new Promise<TaskEnd>((resolve) => {
+      // The terminal reports the result; the task end event only matters when the terminal
+      // was never opened (the task could not be started)
+      const started: { execution?: vscode.TaskExecution } = {};
+      const endedWithoutStart = new Promise<undefined>((resolve) => {
         disposables.push(
-          vscode.tasks.onDidEndTaskProcess((e) => {
-            if (isOwnExecution(e.execution)) resolve({ kind: "process", exitCode: e.exitCode });
-          }),
           vscode.tasks.onDidEndTask((e) => {
-            if (isOwnExecution(e.execution)) resolve({ kind: "task" });
+            if (!pty.started && (e.execution === started.execution || e.execution.task === task)) resolve(undefined);
           })
         );
       });
 
-      execution = await vscode.tasks.executeTask(task);
-      started.execution = execution;
-      const end = await finished;
+      started.execution = await vscode.tasks.executeTask(task);
+      const result = await Promise.race([pty.done, endedWithoutStart]);
 
-      if (end.kind === "task" || end.exitCode === undefined) {
-        // The process could not be started (e.g. dotnet is not on PATH) or was terminated
-        Logger.error(`TaskExecutor.ExecuteTask: Task ${task.name} did not run to completion`);
-        throw new Error("dotnet could not be started or was terminated. See the terminal output for details.");
+      if (!result) {
+        throw new Error("The dotnet task could not be started.");
       }
-      if (end.exitCode !== 0) {
-        Logger.error(`TaskExecutor.ExecuteTask: Task ${task.name} failed with exit code ${end.exitCode}`);
-        throw new Error(`dotnet exited with code ${end.exitCode}. See the terminal output for details.`);
+      if (result.spawnError) {
+        Logger.error(`TaskExecutor.ExecuteDotnet: dotnet could not be started`, result.spawnError);
+        throw new Error(`dotnet could not be started (${result.spawnError.message}). Is the .NET SDK installed and on PATH?`);
       }
-      Logger.info(`TaskExecutor.ExecuteTask: Task ${task.name} completed`);
+      if (result.exitCode === undefined) {
+        throw new Error("dotnet was terminated.");
+      }
+      if (result.exitCode !== 0) {
+        Logger.error(`TaskExecutor.ExecuteDotnet: Task ${name} failed with exit code ${result.exitCode}\n${result.output}`);
+        const details = extractDotnetErrors(result.output);
+        throw new Error(`dotnet exited with code ${result.exitCode}${details ? `: ${details}` : ""}`);
+      }
+      Logger.info(`TaskExecutor.ExecuteDotnet: Task ${name} completed`);
     } finally {
       disposables.forEach((d) => d.dispose());
-      this.lastTask = task;
-      this.lastExecution = execution;
       this.LastFinishedAt = Date.now();
       releaser();
     }

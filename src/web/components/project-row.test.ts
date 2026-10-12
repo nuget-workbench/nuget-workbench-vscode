@@ -249,4 +249,30 @@ suite('ProjectRow Component', () => {
         assert.strictEqual(shadowRoot?.querySelector('.codicon-arrow-circle-up'), null);
         assert.strictEqual(shadowRoot?.querySelector('.codicon-arrow-circle-down'), null);
     });
+
+    test('run() without confirmation and notification skips the dialog and the reload event', async () => {
+        let confirmations = 0;
+        (mockHostApi as any).showConfirmation = async () => { confirmations++; return ok({ Confirmed: true }); };
+        let updatedEvents = 0;
+        projectRow.addEventListener('project-updated', () => updatedEvents++);
+
+        const result = await projectRow.run('UNINSTALL', { confirm: false, notify: false });
+
+        assert.ok(result);
+        assert.strictEqual(confirmations, 0);
+        assert.strictEqual(updatedEvents, 0);
+    });
+
+    test('run() reports the operation and its error to the output log', async () => {
+        mockHostApi.updateProject = async () => ({ ok: false, error: 'dotnet exited with code 1: error NU1101: Unable to find package' });
+        const entries: Array<{ text: string; level: string }> = [];
+        projectRow.addEventListener('operation-log', (e) => entries.push((e as CustomEvent).detail));
+
+        const result = await projectRow.run('INSTALL');
+
+        assert.strictEqual(result, null);
+        assert.strictEqual(entries[0].level, 'info');
+        assert.ok(entries[0].text.startsWith('Installing TestPackage 1.0.0 in TestProject'));
+        assert.deepStrictEqual(entries[1], { text: 'TestProject: dotnet exited with code 1: error NU1101: Unable to find package', level: 'error' });
+    });
 });

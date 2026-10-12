@@ -13,6 +13,17 @@ export default class ConfigurationService extends EventTarget {
     return this.configuration;
   }
 
+  /** The URL of the "defaultSource" setting (a URL or a source name), or "" for all sources. */
+  get DefaultSourceUrl(): string {
+    const wanted = this.configuration?.DefaultSource?.trim().toLowerCase();
+    if (!wanted) return "";
+    const normalize = (url: string) => url.trim().replace(/\/+$/, "").toLowerCase();
+    const source = this.configuration?.Sources.find(
+      (s) => normalize(s.Url) === normalize(wanted) || s.Name.toLowerCase() === wanted
+    );
+    return source?.Url ?? "";
+  }
+
   async Reload() {
     const result = await this.hostApi.getConfiguration();
     if (result.ok) {

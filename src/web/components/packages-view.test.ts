@@ -166,7 +166,7 @@ suite('PackagesView Component', () => {
             packagesView.packages = [
                 new PackageViewModel(createMockPackage({ Id: 'Existing', Name: 'Existing' }))
             ];
-            packagesView.packagesPage = 1;
+            packagesView.packagesSkip = 50;
 
             (mockHostApi.getPackages as sinon.SinonStub).resolves(
                 ok({ Packages: [createMockPackage({ Id: 'NewPackage', Name: 'NewPackage' })] })
@@ -183,7 +183,7 @@ suite('PackagesView Component', () => {
             packagesView.packages = [
                 new PackageViewModel(createMockPackage({ Id: 'url/serilog', Name: 'Serilog' }))
             ];
-            packagesView.packagesPage = 1;
+            packagesView.packagesSkip = 50;
 
             (mockHostApi.getPackages as sinon.SinonStub).resolves(
                 ok({ Packages: [
@@ -213,7 +213,7 @@ suite('PackagesView Component', () => {
             await second;
 
             assert.deepStrictEqual(packagesView.packages.map(p => p.Name), ['Newtonsoft.Json']);
-            assert.strictEqual(packagesView.packagesPage, 1);
+            assert.strictEqual(packagesView.packagesSkip, 50);
         });
 
         test('should keep the feed of each search result', async () => {
@@ -248,6 +248,58 @@ suite('PackagesView Component', () => {
 
             const callArgs = (mockHostApi.getPackages as sinon.SinonStub).firstCall.args[0];
             assert.strictEqual(callArgs.ForceReload, true);
+        });
+    });
+
+    suite('Configuration', () => {
+        test('uses the page size setting for search requests', async () => {
+            (registrations.configuration as any)['configuration'].PageSize = 20;
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: [] }));
+
+            await packagesView.LoadPackages();
+
+            assert.strictEqual((mockHostApi.getPackages as sinon.SinonStub).firstCall.args[0].Take, 20);
+        });
+
+        test('resolves the default source by URL or name', () => {
+            const config = (registrations.configuration as any)['configuration'];
+
+            config.DefaultSource = 'private';
+            assert.strictEqual(registrations.configuration.DefaultSourceUrl, 'https://private.nuget.org');
+            config.DefaultSource = 'https://API.nuget.org/v3/index.json/';
+            assert.strictEqual(registrations.configuration.DefaultSourceUrl, 'https://api.nuget.org/v3/index.json');
+            config.DefaultSource = 'unknown';
+            assert.strictEqual(registrations.configuration.DefaultSourceUrl, '');
+        });
+    });
+
+    suite('Bulk actions', () => {
+        setup(() => {
+            packagesView.projects = [
+                new ProjectViewModel(createMockProject('A', [{ Id: 'Pkg', Version: '1.0.0' }])),
+                new ProjectViewModel(createMockProject('B', [{ Id: 'Pkg', Version: '2.0.0' }])),
+                new ProjectViewModel(createMockProject('C', [{ Id: 'Pkg', Version: '[1.0.0]', IsPinned: true, VersionSource: 'project' }])),
+                new ProjectViewModel(createMockProject('D', [])),
+            ];
+            packagesView.selectedPackage = new PackageViewModel(createMockPackage({ Id: 'Pkg', Name: 'Pkg' }));
+            packagesView.selectedVersion = '2.0.0';
+        });
+
+        test('counts the projects each action applies to', () => {
+            assert.deepStrictEqual(packagesView.bulkTargets('INSTALL').map(p => p.Name), ['D']);
+            assert.deepStrictEqual(packagesView.bulkTargets('UPDATE').map(p => p.Name), ['A'], 'pinned and current versions are skipped');
+            assert.deepStrictEqual(packagesView.bulkTargets('UNINSTALL').map(p => p.Name), ['A', 'B', 'C']);
+        });
+
+        test('asks once before uninstalling from all projects', async () => {
+            const confirm = sandbox.stub().resolves(ok({ Confirmed: false }));
+            (mockHostApi as any).showConfirmation = confirm;
+
+            await packagesView.RunBulk('UNINSTALL');
+
+            assert.ok(confirm.calledOnce);
+            assert.ok(confirm.firstCall.args[0].Message.startsWith('Uninstall Pkg from 3 projects'));
+            assert.strictEqual(packagesView.bulkRunning, false);
         });
     });
 
