@@ -275,4 +275,32 @@ suite('ProjectRow Component', () => {
         assert.ok(entries[0].text.startsWith('Installing TestPackage 1.0.0 in TestProject'));
         assert.deepStrictEqual(entries[1], { text: 'TestProject: dotnet exited with code 1: error NU1101: Unable to find package', level: 'error' });
     });
+
+    test('labels centrally managed versions and the project folder', async () => {
+        projectRow.project = new ProjectViewModel({
+            Name: 'TestProject',
+            Path: 'path/to/project',
+            Packages: [{ Id: 'TestPackage', Version: '1.0.0', IsPinned: false, VersionSource: 'central' }],
+            CpmEnabled: true,
+        });
+        projectRow.project.DirHint = 'src/TestProject';
+        await projectRow.updateComplete;
+
+        assert.strictEqual(projectRow.shadowRoot?.querySelector('.version-source')?.textContent, 'CPM');
+        assert.strictEqual(projectRow.shadowRoot?.querySelector('.dir-hint')?.textContent, 'src/TestProject');
+    });
+
+    test('shows a transitive version and offers a direct reference', async () => {
+        projectRow.project = new ProjectViewModel({
+            Name: 'TestProject',
+            Path: 'path/to/project',
+            Packages: [],
+            CpmEnabled: false,
+            TransitivePackages: [{ Id: 'TestPackage', Version: '0.9.0', Frameworks: ['net8.0'], ViaIds: ['Parent'] }],
+        });
+        await projectRow.updateComplete;
+
+        assert.strictEqual(projectRow.shadowRoot?.querySelector('.version.transitive')?.textContent?.trim(), '0.9.0 (transitive)');
+        assert.strictEqual(projectRow.shadowRoot?.querySelector('.icon-btn')?.getAttribute('title'), 'Add direct reference 1.0.0');
+    });
 });

@@ -176,6 +176,22 @@ export class PackageDetailsComponent extends LitElement {
         background: var(--vscode-charts-green, #10b981);
         color: var(--vscode-editor-background);
       }
+
+      .deprecated-badge,
+      .vulnerable-badge {
+        font-size: 9px;
+        padding: 0 4px;
+        border-radius: 3px;
+        border: 1px solid currentColor;
+      }
+
+      .deprecated-badge {
+        color: var(--vscode-editorWarning-foreground);
+      }
+
+      .vulnerable-badge {
+        color: var(--vscode-errorForeground);
+      }
     `,
   ];
 
@@ -331,6 +347,9 @@ export class PackageDetailsComponent extends LitElement {
   private renderVersionsTab(): unknown {
     const versions = this.package?.Versions ?? [];
     const installedVersion = this.package?.InstalledVersion;
+    const vulnerableVersions = new Set(
+      (this.package?.Model.Versions ?? []).filter((v) => v.Vulnerabilities?.length).map((v) => v.Version)
+    );
 
     return html`
       <div class="versions-list" role="list" aria-label="Package versions">
@@ -345,6 +364,12 @@ export class PackageDetailsComponent extends LitElement {
               <span class="version-badges">
                 ${isInstalled ? html`<span class="installed-badge">installed</span>` : nothing}
                 ${isPrerelease ? html`<span class="prerelease-badge">pre</span>` : nothing}
+                ${this.package?.GetDeprecation(v)
+                  ? html`<span class="deprecated-badge" title="This version is deprecated">deprecated</span>`
+                  : nothing}
+                ${vulnerableVersions.has(v)
+                  ? html`<span class="vulnerable-badge" title="This version has known vulnerabilities">vulnerable</span>`
+                  : nothing}
               </span>
             </div>
           `;

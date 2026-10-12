@@ -39,6 +39,10 @@ const styles = css`
       .name {
         font-weight: bold;
       }
+      .dir-hint {
+        margin-left: 4px;
+        color: var(--vscode-descriptionForeground);
+      }
     }
 
     .project-actions {
@@ -53,6 +57,18 @@ const styles = css`
       .version {
         font-family: var(--vscode-editor-font-family);
         font-size: 12px;
+      }
+
+      .version.transitive {
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .version-source {
+        font-size: 9px;
+        padding: 0 3px;
+        border-radius: 3px;
+        border: 1px solid var(--vscode-panelSection-border);
+        color: var(--vscode-descriptionForeground);
       }
 
       .row-error {
@@ -155,12 +171,20 @@ export class ProjectRow extends LitElement {
     const target = this.packageVersion;
 
     if (pkg === undefined) {
+      const id = this.packageId?.toLowerCase();
+      const transitive = this.project.TransitivePackages.find((x) => x.Id.toLowerCase() === id);
+      const installLabel = transitive ? "Add direct reference" : "Install";
       return html`
         ${errorIcon}
+        ${transitive
+          ? html`<span class="version transitive" title="Transitive, pulled in by ${transitive.ViaIds.join(", ")}"
+              >${transitive.Version} (transitive)</span
+            >`
+          : nothing}
         <button
           class="icon-btn"
-          aria-label="Install ${this.packageId}${target ? ` ${target}` : ""} in ${this.project.Name}"
-          title=${target ? `Install ${target}` : "Install"}
+          aria-label="${installLabel} ${this.packageId}${target ? ` ${target}` : ""} in ${this.project.Name}"
+          title=${target ? `${installLabel} ${target}` : installLabel}
           @click=${() => this.run("INSTALL")}
         >
           <span class="codicon codicon-diff-added"></span>
@@ -173,6 +197,11 @@ export class ProjectRow extends LitElement {
 
     return html`
       ${errorIcon}
+      ${pkg.VersionSource === "central"
+        ? html`<span class="version-source" title="Version from Directory.Packages.props">CPM</span>`
+        : pkg.VersionSource === "override"
+          ? html`<span class="version-source" title="VersionOverride in the project file">override</span>`
+          : nothing}
       <span class="version" title=${pkg.IsPinned ? "Pinned version" : ""}>${version}</span>
       ${canChange
         ? html`
@@ -202,6 +231,7 @@ export class ProjectRow extends LitElement {
       <div class="project-row">
         <div class="project-title" title=${this.project.Path}>
           <span class="name">${this.project.Name}</span>
+          ${this.project.DirHint ? html`<span class="dir-hint">${this.project.DirHint}</span>` : nothing}
         </div>
         <div class="project-actions">${this.renderActions()}</div>
       </div>

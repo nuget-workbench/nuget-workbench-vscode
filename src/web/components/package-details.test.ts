@@ -293,4 +293,22 @@ suite('PackageDetails Component', () => {
         assert.ok(noDeps, "No dependencies message should be visible");
         assert.ok(noDeps.textContent?.includes('No dependencies'));
     });
+
+    test('marks deprecated and vulnerable versions in the Versions tab', async () => {
+        packageDetails.package = new PackageViewModel({
+            Id: 'Old.Package', Name: 'Old.Package', Version: '2.0.0', Description: '', Authors: [], LicenseUrl: '',
+            ProjectUrl: '', Tags: [], IconUrl: '', Registration: '', TotalDownloads: 0, Verified: false, InstalledVersion: '',
+            Versions: [
+                { Version: '1.0.0', Id: 'v1', Vulnerabilities: [{ AdvisoryUrl: 'https://advisory', Severity: 2 }] },
+                { Version: '2.0.0', Id: 'v2' },
+            ],
+            Deprecations: { '1.0.0': { Reasons: ['Legacy'] } },
+        });
+        packageDetails.activeTab = 'versions';
+        await packageDetails.updateComplete;
+
+        const rows = Array.from(packageDetails.shadowRoot?.querySelectorAll('.version-row') ?? []);
+        const badges = rows.map((r) => Array.from(r.querySelectorAll('.deprecated-badge, .vulnerable-badge')).map((b) => b.textContent));
+        assert.deepStrictEqual(badges, [[], ['deprecated', 'vulnerable']]);
+    });
 });

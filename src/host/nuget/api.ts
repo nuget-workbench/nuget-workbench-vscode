@@ -1,6 +1,6 @@
 import axios, { AxiosError, AxiosInstance, AxiosRequestConfig, AxiosResponse, InternalAxiosRequestConfig } from "axios";
 import { Logger } from "../../common/logger";
-import { isPrerelease } from "../../common/version";
+import { isPrerelease, normalizeVersion } from "../../common/version";
 import type { CredentialFallback } from "../utilities/credential-provider";
 
 type GetPackagesResponse = {
@@ -182,8 +182,15 @@ export default class NuGetApi {
         itemsToUse.map((v: any) => ({
           Version: v.catalogEntry.version,
           Id: v["@id"],
+          ...(Array.isArray(v.catalogEntry.vulnerabilities) && v.catalogEntry.vulnerabilities.length > 0 && {
+            Vulnerabilities: v.catalogEntry.vulnerabilities.map((x: { advisoryUrl?: string; severity?: string | number }) => ({
+              AdvisoryUrl: x.advisoryUrl ?? "",
+              Severity: Number(x.severity) as VulnerableSeverity,
+            })),
+          }),
         })) || [],
       Tags: catalogEntry?.tags || [],
+      Deprecations: mapDeprecations(allItems),
     };
 
     this._packageCache.set(cacheKey, { data: packageObject, timestamp: Date.now() });
@@ -375,4 +382,33 @@ export default class NuGetApi {
 function basicAuth(username: string | undefined, password: string): string {
   // btoa() throws for characters above U+00FF and encodes others as Latin-1
   return `Basic ${Buffer.from(`${username ?? ""}:${password}`, "utf8").toString("base64")}`;
+}
+
+/**
+ * Deprecated versions from all registration items: an installed version is often unlisted or a
+ * prerelease that the version list leaves out, and still needs its warning.
+ */
+type RegistrationItem = {
+  catalogEntry?: {
+    version?: string;
+    deprecation?: { reasons?: string[]; message?: string; alternatePackage?: { id?: string; range?: string } };
+  };
+};
+
+function mapDeprecations(items: RegistrationItem[]): Record<string, PackageDeprecation> | undefined {
+  let deprecations: Record<string, PackageDeprecation> | undefined;
+  for (const item of items) {
+    const deprecation = item.catalogEntry?.deprecation;
+    const version = item.catalogEntry?.version;
+    if (!deprecation || !version) continue;
+    deprecations ??= {};
+    deprecations[normalizeVersion(version)] = {
+      Reasons: Array.isArray(deprecation.reasons) ? deprecation.reasons : [],
+      ...(deprecation.message && { Message: String(deprecation.message) }),
+      ...(deprecation.alternatePackage?.id && {
+        AlternatePackage: { Id: deprecation.alternatePackage.id, Range: deprecation.alternatePackage.range ?? "*" },
+      }),
+    };
+  }
+  return deprecations;
 }

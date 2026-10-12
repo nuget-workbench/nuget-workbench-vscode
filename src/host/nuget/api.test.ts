@@ -165,6 +165,55 @@ suite('NuGetApi Tests', () => {
     });
 
     suite('GetPackageAsync', () => {
+        function registration(entries: Array<Record<string, unknown>>) {
+            return {
+                data: {
+                    count: 1,
+                    items: [{
+                        items: entries.map((entry) => ({
+                            '@id': `https://api.nuget.org/v3/registration/pkg/${entry.version}.json`,
+                            catalogEntry: { id: 'Old.Package', ...entry },
+                        })),
+                    }],
+                },
+            };
+        }
+
+        test('should map deprecated versions, including unlisted and filtered ones', async () => {
+            const api = new NuGetApi('https://api.nuget.org/v3/index.json');
+            const httpStub = sandbox.stub((api as any).http, 'get');
+            httpStub.onFirstCall().resolves(mockServiceIndex);
+            httpStub.onSecondCall().resolves(registration([
+                { version: '1.0.0', listed: false, deprecation: { reasons: ['Legacy'], message: 'Use New.Package', alternatePackage: { id: 'New.Package', range: '[2.0.0, )' } } },
+                { version: '1.1.0-beta', deprecation: { reasons: ['CriticalBugs'] } },
+                { version: '1.2.0' },
+            ]));
+
+            const result = await api.GetPackageAsync('Old.Package', false);
+
+            assert.deepStrictEqual(result.data?.Versions.map(v => v.Version), ['1.2.0']);
+            assert.deepStrictEqual(result.data?.Deprecations, {
+                '1.0.0': { Reasons: ['Legacy'], Message: 'Use New.Package', AlternatePackage: { Id: 'New.Package', Range: '[2.0.0, )' } },
+                '1.1.0-beta': { Reasons: ['CriticalBugs'] },
+            });
+        });
+
+        test('should map version vulnerabilities and leave deprecations empty when there are none', async () => {
+            const api = new NuGetApi('https://api.nuget.org/v3/index.json');
+            const httpStub = sandbox.stub((api as any).http, 'get');
+            httpStub.onFirstCall().resolves(mockServiceIndex);
+            httpStub.onSecondCall().resolves(registration([
+                { version: '1.0.0', vulnerabilities: [{ advisoryUrl: 'https://github.com/advisories/GHSA-1', severity: '2' }] },
+                { version: '1.1.0' },
+            ]));
+
+            const result = await api.GetPackageAsync('Old.Package', false);
+
+            assert.strictEqual(result.data?.Deprecations, undefined);
+            assert.deepStrictEqual(result.data?.Versions[0].Vulnerabilities, [{ AdvisoryUrl: 'https://github.com/advisories/GHSA-1', Severity: 2 }]);
+            assert.strictEqual(result.data?.Versions[1].Vulnerabilities, undefined);
+        });
+
         test('should fetch package info and map correctly', async () => {
             const api = new NuGetApi('https://api.nuget.org/v3/index.json');
             

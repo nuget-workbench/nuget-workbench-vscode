@@ -303,6 +303,39 @@ suite('PackagesView Component', () => {
         });
     });
 
+    suite('Transitive packages', () => {
+        test('lists transitive packages without the direct ones and without loading them', async () => {
+            const project = createMockProject('App', [{ Id: 'Serilog.AspNetCore', Version: '8.0.0' }]);
+            project.TransitivePackages = [
+                { Id: 'Serilog', Version: '3.1.1', Frameworks: ['net8.0'], ViaIds: ['Serilog.AspNetCore'] },
+                { Id: 'serilog.aspnetcore', Version: '8.0.0', Frameworks: ['net8.0'], ViaIds: ['Other'] },
+            ];
+            packagesView.projects = [new ProjectViewModel(project)];
+            const getPackage = mockHostApi.getPackage as sinon.SinonStub;
+            getPackage.resetHistory();
+
+            await packagesView.LoadProjectsPackages();
+
+            assert.deepStrictEqual(packagesView.transitivePackages.map(p => p.Name), ['Serilog']);
+            const serilog = packagesView.transitivePackages[0];
+            assert.strictEqual(serilog.IsTransitive, true);
+            assert.strictEqual(serilog.AllowsUpdate, false);
+            assert.deepStrictEqual(serilog.ViaIds, ['Serilog.AspNetCore']);
+            assert.deepStrictEqual(getPackage.getCalls().map(c => c.args[0].Id), ['Serilog.AspNetCore']);
+        });
+
+        test('selecting a transitive package from another tab opens it', async () => {
+            const project = createMockProject('App', []);
+            project.TransitivePackages = [{ Id: 'Serilog', Version: '3.1.1', Frameworks: ['net8.0'], ViaIds: ['Serilog.AspNetCore'] }];
+            packagesView.projects = [new ProjectViewModel(project)];
+            await packagesView.LoadProjectsPackages();
+
+            await (packagesView as any).onChildPackageSelected(new CustomEvent('package-selected', { detail: { packageId: 'serilog' } }));
+
+            assert.strictEqual(packagesView.selectedPackage, packagesView.transitivePackages[0]);
+        });
+    });
+
     suite('RefreshFromWorkspace', () => {
         test('reloads the projects without fetching every package again', async () => {
             const getProjects = mockHostApi.getProjects as sinon.SinonStub;

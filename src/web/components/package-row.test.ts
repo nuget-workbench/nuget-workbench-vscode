@@ -270,4 +270,44 @@ suite('PackageRow Component', () => {
         const row = shadowRoot?.querySelector('.package-row');
         assert.ok(row?.classList.contains('package-row-selected'), 'Row should have selected class');
     });
+
+    test('shows a transitive package without update hint or spinner', async () => {
+        const pkg = createPackageViewModel({ InstalledVersion: '3.1.1', Version: '', Status: 'MissingDetails' });
+        pkg.IsTransitive = true;
+        pkg.AllowsUpdate = false;
+        pkg.ViaIds = ['Serilog.AspNetCore'];
+        packageRow.package = pkg;
+        packageRow.showInstalledVersion = true;
+        await packageRow.updateComplete;
+
+        const tag = packageRow.shadowRoot?.querySelector('.transitive-tag');
+        assert.ok(tag);
+        assert.strictEqual(tag?.getAttribute('title'), 'Transitive, pulled in by Serilog.AspNetCore');
+        assert.strictEqual(packageRow.shadowRoot?.querySelector('.spinner'), null);
+        assert.strictEqual(packageRow.shadowRoot?.querySelector('.codicon-arrow-circle-up'), null);
+    });
+
+    test('warns when the installed version is deprecated', async () => {
+        packageRow.package = createPackageViewModel({
+            InstalledVersion: '1.0.0',
+            Version: '2.0.0',
+            Deprecations: { '1.0.0': { Reasons: ['CriticalBugs'], AlternatePackage: { Id: 'New.Package', Range: '*' } } },
+        });
+        packageRow.showInstalledVersion = true;
+        await packageRow.updateComplete;
+
+        const warning = packageRow.shadowRoot?.querySelector('.deprecated');
+        assert.strictEqual(warning?.getAttribute('title'), 'Deprecated: critical bugs. use New.Package instead');
+    });
+
+    test('does not warn for "Multiple" installed versions', async () => {
+        packageRow.package = createPackageViewModel({
+            InstalledVersion: 'Multiple',
+            Deprecations: { '1.0.0': { Reasons: ['Legacy'] } },
+        });
+        packageRow.showInstalledVersion = true;
+        await packageRow.updateComplete;
+
+        assert.strictEqual(packageRow.shadowRoot?.querySelector('.deprecated'), null);
+    });
 });

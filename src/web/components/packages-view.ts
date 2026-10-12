@@ -8,7 +8,7 @@ import { hostApi, configuration } from "@/web/registrations";
 import codicon from "@/web/styles/codicon.css";
 import { scrollableBase } from "@/web/styles/base.css";
 import { sharedStyles } from "@/web/styles/shared.css";
-import { PackageViewModel, ProjectViewModel } from "../types";
+import { PackageViewModel, ProjectViewModel, applyDirHints } from "../types";
 import { isNonConcreteVersion } from "@/common/version";
 import type { FilterEvent } from "./search-bar";
 import type { SearchBar } from "./search-bar";
@@ -18,6 +18,7 @@ import type { VulnerabilitiesView } from "./vulnerabilities-view";
 import type { DropdownOption } from "./dropdown";
 import type { NugetOutputLog } from "./nuget-output-log";
 import { canChangeVersion, type ProjectOperation, type ProjectRow } from "./project-row";
+import { deprecationText } from "./package-row";
 import type { OperationLogDetail } from "../operation-log";
 import "./dropdown";
 
@@ -159,6 +160,31 @@ export class PackagesView extends LitElement {
 
           .installed-packages {
             flex-direction: column;
+
+            .transitive-toggle {
+              display: flex;
+              align-items: center;
+              gap: 4px;
+              margin: 0 4px 6px;
+              font-size: 11px;
+              color: var(--vscode-descriptionForeground);
+            }
+
+            .section-header {
+              margin: 10px 4px 4px;
+              font-size: 11px;
+              font-weight: bold;
+              text-transform: uppercase;
+              color: var(--vscode-descriptionForeground);
+            }
+
+            .hint {
+              display: flex;
+              gap: 4px;
+              margin: 0 4px 6px;
+              font-size: 11px;
+              color: var(--vscode-descriptionForeground);
+            }
           }
 
           .packages-container {
@@ -253,6 +279,21 @@ export class PackagesView extends LitElement {
             }
           }
 
+          .deprecation-banner {
+            display: flex;
+            align-items: flex-start;
+            gap: 6px;
+            margin: 6px 6px 0;
+            padding: 6px;
+            border-left: 3px solid var(--vscode-editorWarning-foreground);
+            background: var(--vscode-inputValidation-warningBackground, transparent);
+            font-size: 12px;
+
+            .codicon-warning {
+              color: var(--vscode-editorWarning-foreground);
+            }
+          }
+
           .package-actions-row {
             display: flex;
             align-items: center;
@@ -316,6 +357,8 @@ export class PackagesView extends LitElement {
   @state() selectedPackage: PackageViewModel | null = null;
   @state() packages: Array<PackageViewModel> = [];
   @state() projectsPackages: Array<PackageViewModel> = [];
+  @state() transitivePackages: Array<PackageViewModel> = [];
+  @state() showTransitive: boolean = false;
   @state() updatesCount: number | null = null;
   @state() consolidateCount: number | null = null;
   @state() vulnerabilitiesCount: number | null = null;
@@ -506,6 +549,12 @@ export class PackagesView extends LitElement {
       return;
     }
 
+    const transitive = this.transitivePackages.find((p) => p.Name.toLowerCase() === lowerId);
+    if (transitive) {
+      await this.SelectPackage(transitive);
+      return;
+    }
+
     // Check if we have it in browse packages
     const browsePkg = this.packages.find((p) => p.Name.toLowerCase() === lowerId);
     if (browsePkg) {
@@ -652,6 +701,8 @@ export class PackagesView extends LitElement {
       return pkg;
     });
 
+    this.transitivePackages = this.buildTransitivePackages(projectsToUse);
+
     const total = this.projectsPackages.length;
     let completed = 0;
 
@@ -686,6 +737,64 @@ export class PackagesView extends LitElement {
         }
       }
     }
+  }
+
+  /**
+   * Packages the projects get through their references, without the ones they reference
+   * directly. Their details are only loaded when one is selected: there can be hundreds.
+   */
+  private buildTransitivePackages(projects: ProjectViewModel[]): PackageViewModel[] {
+    const query = this.filters.Query?.toLowerCase() ?? "";
+    const directIds = new Set(projects.flatMap((p) => p.Packages.map((x) => x.Id.toLowerCase())));
+    const grouped = new Map<string, { id: string; versions: string[]; via: Set<string> }>();
+
+    for (const project of projects) {
+      for (const pkg of project.TransitivePackages) {
+        const key = pkg.Id.toLowerCase();
+        if (directIds.has(key) || !key.includes(query)) continue;
+        let entry = grouped.get(key);
+        if (!entry) {
+          entry = { id: pkg.Id, versions: [], via: new Set() };
+          grouped.set(key, entry);
+        }
+        if (!entry.versions.includes(pkg.Version)) entry.versions.push(pkg.Version);
+        pkg.ViaIds.forEach((id) => entry!.via.add(id));
+      }
+    }
+
+    // Keep the loaded details (and the selection) of a package across reloads
+    const previous = new Map(this.transitivePackages.map((p) => [p.Name.toLowerCase(), p]));
+    return Array.from(grouped.values())
+      .sort((a, b) => a.id.localeCompare(b.id))
+      .map((entry) => {
+        const installedVersion = entry.versions.length > 1 ? "Multiple" : entry.versions[0];
+        const existing = previous.get(entry.id.toLowerCase());
+        const pkg = existing && existing.InstalledVersion === installedVersion
+          ? existing
+          : new PackageViewModel(
+              {
+                Id: entry.id,
+                Name: entry.id,
+                IconUrl: "",
+                Versions: entry.versions.map((x) => ({ Id: "", Version: x })),
+                InstalledVersion: installedVersion,
+                Version: "",
+                Description: "",
+                LicenseUrl: "",
+                ProjectUrl: "",
+                Verified: false,
+                TotalDownloads: 0,
+                Tags: [],
+                Registration: "",
+                Authors: [],
+              },
+              "MissingDetails"
+            );
+        pkg.IsTransitive = true;
+        pkg.AllowsUpdate = false;
+        pkg.ViaIds = Array.from(entry.via).sort();
+        return pkg;
+      });
   }
 
   async OnProjectUpdated(event: CustomEvent): Promise<void> {
@@ -777,6 +886,9 @@ export class PackagesView extends LitElement {
       .filter((x) => x.Selected)
       .forEach((x) => (x.Selected = false));
     this.projectsPackages
+      .filter((x) => x.Selected)
+      .forEach((x) => (x.Selected = false));
+    this.transitivePackages
       .filter((x) => x.Selected)
       .forEach((x) => (x.Selected = false));
     selectedPackage.Selected = true;
@@ -926,6 +1038,7 @@ export class PackagesView extends LitElement {
     this.projects = result.value.Projects.map(
       (x) => new ProjectViewModel(x)
     );
+    applyDirHints(this.projects);
     const newPaths = this.projects.map((p) => p.Path);
     // Keep the user's project selection across reloads
     this.selectedProjectPaths = hadAllSelected
@@ -988,38 +1101,60 @@ export class PackagesView extends LitElement {
     const selected = this.selectedPackage;
     const selectedName =
       selected && !this.packages.includes(selected) ? selected.Name.toLowerCase() : null;
+    const renderRow = (pkg: PackageViewModel) => html`
+      <package-row
+        .showInstalledVersion=${true}
+        .package=${pkg}
+        .revision=${pkg.Revision}
+        .selected=${pkg === selected || (selectedName !== null && pkg.Name.toLowerCase() === selectedName)}
+        @click=${() => this.SelectPackage(pkg)}
+      ></package-row>
+    `;
+
+    if (this.noProjectsSelected) {
+      return html`<div class="packages-container installed-packages">${this.renderNoProjectsSelected()}</div>`;
+    }
+
+    const notRestored = this.filteredProjects.filter((p) => p.AssetsStatus === "notRestored");
     return html`
       <div class="packages-container installed-packages">
-        ${this.noProjectsSelected
-          ? this.renderNoProjectsSelected()
-          : this.projectsPackages.length === 0 && !this.projectsLoading
-            ? html`<div class="empty">
-                <span class="codicon codicon-package"></span>
-                ${this.projectsLoadingError
-                  ? this.projectsLoadingError
-                  : this.filters.Query
-                    ? `No installed packages match "${this.filters.Query}"`
-                    : "No packages installed in the selected projects"}
-              </div>`
-            : html`<div role="listbox" aria-label="Installed packages">
-                ${repeat(
-                  this.projectsPackages,
-                  (pkg) => pkg.Id,
-                  (pkg) => html`
-                    <package-row
-                      .showInstalledVersion=${true}
-                      .package=${pkg}
-                      .revision=${pkg.Revision}
-                      .selected=${pkg === selected || (selectedName !== null && pkg.Name.toLowerCase() === selectedName)}
-                      @click=${() => this.SelectPackage(pkg)}
-                    ></package-row>
-                  `
-                )}
-              </div>`}
+        <label class="checkbox-label transitive-toggle">
+          <input
+            type="checkbox"
+            .checked=${this.showTransitive}
+            @change=${(e: Event) => { this.showTransitive = (e.target as HTMLInputElement).checked; }}
+          />
+          Show transitive packages
+        </label>
+        ${this.projectsPackages.length === 0 && !this.projectsLoading
+          ? html`<div class="empty">
+              <span class="codicon codicon-package"></span>
+              ${this.projectsLoadingError
+                ? this.projectsLoadingError
+                : this.filters.Query
+                  ? `No installed packages match "${this.filters.Query}"`
+                  : "No packages installed in the selected projects"}
+            </div>`
+          : html`<div role="listbox" aria-label="Installed packages">
+              ${repeat(this.projectsPackages, (pkg) => pkg.Id, renderRow)}
+            </div>`}
+        ${this.showTransitive
+          ? html`
+              <div class="section-header">Transitive packages (${this.transitivePackages.length})</div>
+              ${notRestored.length > 0
+                ? html`<div class="hint">
+                    <span class="codicon codicon-info"></span>
+                    Restore ${notRestored.map((p) => p.Name).join(", ")} to see ${notRestored.length === 1 ? "its" : "their"} transitive packages.
+                  </div>`
+                : nothing}
+              <div role="listbox" aria-label="Transitive packages">
+                ${repeat(this.transitivePackages, (pkg) => pkg.Name, renderRow)}
+              </div>
+            `
+          : nothing}
       </div>
     `;
   }
-
 
   private renderNoProjectsSelected(): unknown {
     return html`<div class="empty">
@@ -1149,6 +1284,36 @@ export class PackagesView extends LitElement {
     </div>`;
   }
 
+  /** Warns when an installed version (or, if none, the selected version) is deprecated. */
+  private renderDeprecationBanner(): unknown {
+    const pkg = this.selectedPackage;
+    if (!pkg) return nothing;
+    const id = pkg.Name.toLowerCase();
+    const installedVersions = this.filteredProjects.flatMap((p) => [
+      ...p.Packages.filter((x) => x.Id.toLowerCase() === id).map((x) => x.Version),
+      ...p.TransitivePackages.filter((x) => x.Id.toLowerCase() === id).map((x) => x.Version),
+    ]);
+    const candidates = installedVersions.length > 0 ? installedVersions : [this.selectedVersion];
+
+    const version = candidates.find((v) => pkg.GetDeprecation(v));
+    const deprecation = version ? pkg.GetDeprecation(version) : undefined;
+    if (!version || !deprecation) return nothing;
+
+    const alternate = deprecation.AlternatePackage;
+    return html`<div class="deprecation-banner" role="alert">
+      <span class="codicon codicon-warning"></span>
+      <span>
+        ${version} is deprecated: ${deprecationText(deprecation)}
+        ${alternate
+          ? html`<button
+              class="link-btn"
+              @click=${() => this.onChildPackageSelected(new CustomEvent("package-selected", { detail: { packageId: alternate.Id } }))}
+            >Show ${alternate.Id}</button>`
+          : nothing}
+      </span>
+    </div>`;
+  }
+
   private renderDetailedPackage(): unknown {
     const sourceName = this.selectedSourceName;
 
@@ -1177,6 +1342,7 @@ export class PackagesView extends LitElement {
             : nothing}
         </div>
       </div>
+      ${this.renderDeprecationBanner()}
       <div class="package-actions-row">
         <div class="version-selector">
           <custom-dropdown

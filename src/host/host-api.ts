@@ -32,6 +32,7 @@ import type { Result } from "../common/rpc/result";
 import { ok, fail } from "../common/rpc/result";
 import ProjectParser from "./utilities/project-parser";
 import CpmResolver from "./utilities/cpm-resolver";
+import AssetsReader from "./utilities/assets-reader";
 import nugetApiFactory from "./nuget/api-factory";
 import NuGetConfigResolver, { normalizeSourceUrl } from "./utilities/nuget-config-resolver";
 import TaskExecutor from "./utilities/task-executor";
@@ -97,12 +98,10 @@ export function createHostAPI(): HostAPI {
       Logger.info("getProjects: Handling request");
       if (request.ForceReload) {
         CpmResolver.ClearCache();
+        AssetsReader.ClearCache();
       }
 
-      const projectFiles = await vscode.workspace.findFiles(
-        "**/*.{csproj,fsproj,vbproj}",
-        "**/node_modules/**"
-      );
+      const projectFiles = await findProjectFiles();
 
       Logger.info(`getProjects: Found ${projectFiles.length} project files`);
 
@@ -112,6 +111,7 @@ export function createHostAPI(): HostAPI {
           const cpmVersions = await CpmResolver.GetPackageVersions(file.fsPath);
           const project = await ProjectParser.Parse(file.fsPath, cpmVersions);
           project.CpmEnabled = cpmVersions !== null;
+          await addTransitivePackages(project);
           projects.push(project);
         } catch (e) {
           Logger.error(`getProjects: Failed to parse project ${file.fsPath}`, e);
@@ -294,6 +294,8 @@ export function createHostAPI(): HostAPI {
       try {
         const cpmVersions = await CpmResolver.GetPackageVersions(request.ProjectPath);
         const updatedProject = await ProjectParser.Parse(request.ProjectPath, cpmVersions);
+        updatedProject.CpmEnabled = cpmVersions !== null;
+        await addTransitivePackages(updatedProject);
         return ok({ Project: updatedProject, IsCpmEnabled: isCpmEnabled });
       } catch (err) {
         Logger.error(`updateProject: Failed to reload ${request.ProjectPath}`, err);
@@ -389,10 +391,7 @@ export function createHostAPI(): HostAPI {
           return ok({ Packages: [] });
         }
 
-        let projectFiles = await vscode.workspace.findFiles(
-          "**/*.{csproj,fsproj,vbproj}",
-          "**/node_modules/**"
-        );
+        let projectFiles = await findProjectFiles();
 
         if (request.ProjectPaths && request.ProjectPaths.length > 0) {
           projectFiles = projectFiles.filter((f) => request.ProjectPaths!.includes(f.fsPath));
@@ -480,6 +479,8 @@ export function createHostAPI(): HostAPI {
           return fail(`Failed to check for updates: ${formatApiError(lookupErrors[0])}`);
         }
 
+        await markDeprecatedVersions(outdated, request.Prerelease);
+
         outdated.sort((a, b) => a.Id.localeCompare(b.Id));
         Logger.info(`getOutdatedPackages: Found ${outdated.length} outdated packages`);
         return ok({ Packages: outdated });
@@ -532,10 +533,7 @@ export function createHostAPI(): HostAPI {
       Logger.info("getInconsistentPackages: Checking for version inconsistencies");
 
       try {
-        let projectFiles = await vscode.workspace.findFiles(
-          "**/*.{csproj,fsproj,vbproj}",
-          "**/node_modules/**"
-        );
+        let projectFiles = await findProjectFiles();
 
         if (request.ProjectPaths && request.ProjectPaths.length > 0) {
           projectFiles = projectFiles.filter((f) => request.ProjectPaths!.includes(f.fsPath));
@@ -618,10 +616,7 @@ export function createHostAPI(): HostAPI {
           return ok({ Packages: [] });
         }
 
-        let projectFiles = await vscode.workspace.findFiles(
-          "**/*.{csproj,fsproj,vbproj}",
-          "**/node_modules/**"
-        );
+        let projectFiles = await findProjectFiles();
 
         if (request.ProjectPaths && request.ProjectPaths.length > 0) {
           projectFiles = projectFiles.filter((f) => request.ProjectPaths!.includes(f.fsPath));
@@ -632,6 +627,7 @@ export function createHostAPI(): HostAPI {
           try {
             const cpmVersions = await CpmResolver.GetPackageVersions(file.fsPath);
             const project = await ProjectParser.Parse(file.fsPath, cpmVersions);
+            await addTransitivePackages(project);
             projects.push(project);
           } catch (e) {
             Logger.error(`getVulnerablePackages: Failed to parse ${file.fsPath}`, e);
@@ -659,6 +655,25 @@ export function createHostAPI(): HostAPI {
                 projects: [{ Name: project.Name, Path: project.Path }],
               });
             }
+          }
+        }
+
+        // Transitive packages that a project does not also reference directly
+        const transitiveMap = new Map<
+          string,
+          { id: string; version: string; projects: Array<{ Name: string; Path: string }>; via: Set<string> }
+        >();
+        for (const project of projects) {
+          for (const pkg of project.TransitivePackages ?? []) {
+            const key = `${pkg.Id.toLowerCase()}::${normalizeVersion(pkg.Version)}`;
+            if (installedMap.has(key)) continue;
+            let entry = transitiveMap.get(key);
+            if (!entry) {
+              entry = { id: pkg.Id, version: pkg.Version, projects: [], via: new Set() };
+              transitiveMap.set(key, entry);
+            }
+            entry.projects.push({ Name: project.Name, Path: project.Path });
+            pkg.ViaIds.forEach((id) => entry!.via.add(id));
           }
         }
 
@@ -690,8 +705,12 @@ export function createHostAPI(): HostAPI {
         StatusBarUtils.show(60, "Matching vulnerabilities...");
 
         const vulnerable: VulnerablePackage[] = [];
+        const candidates = [
+          ...Array.from(installedMap.values()).map((p) => ({ ...p, transitive: false, via: [] as string[] })),
+          ...Array.from(transitiveMap.values()).map((p) => ({ ...p, transitive: true, via: Array.from(p.via) })),
+        ];
 
-        for (const installed of installedMap.values()) {
+        for (const installed of candidates) {
           const vulnEntries = allVulnerabilities.get(installed.id.toLowerCase());
           if (!vulnEntries) continue;
 
@@ -714,12 +733,15 @@ export function createHostAPI(): HostAPI {
               AdvisoryUrl: worstMatch.url,
               AffectedVersionRange: worstMatch.versions,
               Projects: installed.projects,
+              ...(installed.transitive && { IsTransitive: true, ViaIds: installed.via }),
             });
           }
         }
 
-        // Sort by severity (critical first), then by name
-        vulnerable.sort((a, b) => b.Severity - a.Severity || a.Id.localeCompare(b.Id));
+        // Direct references first (those can be updated here), then by severity and name
+        vulnerable.sort((a, b) =>
+          Number(!!a.IsTransitive) - Number(!!b.IsTransitive) || b.Severity - a.Severity || a.Id.localeCompare(b.Id)
+        );
 
         Logger.info(`getVulnerablePackages: Found ${vulnerable.length} vulnerable packages`);
         return ok({ Packages: vulnerable });
@@ -808,6 +830,29 @@ async function executeAddPackage(
 
   // Run from the project folder, so the restore finds the same nuget.config files as the project
   await TaskExecutor.ExecuteDotnet("dotnet add package", args, path.dirname(projectPath));
+}
+
+function findProjectFiles(): Thenable<vscode.Uri[]> {
+  // An explicit exclude replaces files.exclude; build output may contain copies of project files
+  return vscode.workspace.findFiles("**/*.{csproj,fsproj,vbproj}", "**/{node_modules,bin,obj}/**");
+}
+
+async function addTransitivePackages(project: Project): Promise<void> {
+  const assets = await AssetsReader.Read(project.Path);
+  project.TransitivePackages = assets.Packages;
+  project.AssetsStatus = assets.Status;
+}
+
+/** Best effort: the registrations are usually cached from the Installed tab. */
+async function markDeprecatedVersions(outdated: OutdatedPackage[], prerelease: boolean): Promise<void> {
+  await Promise.allSettled(
+    outdated.map(async (pkg) => {
+      const api = await nugetApiFactory.GetSourceApi(pkg.SourceUrl);
+      const registration = await api.GetPackageAsync(pkg.Id, prerelease);
+      const deprecation = registration.data?.Deprecations?.[normalizeVersion(pkg.InstalledVersion)];
+      if (deprecation) pkg.InstalledDeprecation = deprecation;
+    })
+  );
 }
 
 /**

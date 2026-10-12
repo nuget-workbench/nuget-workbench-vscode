@@ -146,4 +146,15 @@ suite('UpdatesView Component', () => {
         assert.deepStrictEqual(view.packages.map(p => p.Id), ['Newer']);
         assert.strictEqual(view.isLoading, false);
     });
+
+    test('marks a deprecated installed version', async () => {
+        mockHostApi.getOutdatedPackages = async () => ok({
+            Packages: [{ ...outdated('Pkg.A'), InstalledDeprecation: { Reasons: ['Legacy'], Message: 'No longer maintained' } }],
+        });
+        await view.LoadOutdatedPackages();
+        await view.updateComplete;
+
+        const warning = view.shadowRoot?.querySelector('.row-deprecated');
+        assert.strictEqual(warning?.getAttribute('title'), '1.0.0 is deprecated: legacy. No longer maintained');
+    });
 });

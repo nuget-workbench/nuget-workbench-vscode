@@ -1,4 +1,5 @@
 import nonce from "@/common/nonce";
+import { normalizeVersion } from "@/common/version";
 
 type PackageViewModelStatus = "Detailed" | "MissingDetails" | "Error";
 
@@ -22,6 +23,9 @@ export class PackageViewModel {
   SourceUrl: string = "";
   AllowsUpdate: boolean = true;
   Revision: number = 0;
+  /** Not referenced directly by the selected projects; pulled in by ViaIds. */
+  IsTransitive: boolean = false;
+  ViaIds: string[] = [];
 
   constructor(model: Package, status: PackageViewModelStatus = "Detailed") {
     this._authors = model.Authors;
@@ -71,6 +75,12 @@ export class PackageViewModel {
     this.Revision++;
   }
 
+  /** The deprecation of a version, if the feed reports one. */
+  GetDeprecation(version: string): PackageDeprecation | undefined {
+    if (!version || version === "Multiple") return undefined;
+    return this.Model.Deprecations?.[normalizeVersion(version)];
+  }
+
   get Authors() {
     if (Array.isArray(this._authors)) {
       return this._authors.length ? this._authors.join(", ") : "";
@@ -95,12 +105,45 @@ export class ProjectViewModel {
   Path: string;
   CpmEnabled: boolean;
   Packages: ProjectPackageViewModel[];
+  TransitivePackages: TransitivePackage[];
+  AssetsStatus: AssetsStatus | undefined;
+  /** Parent folders shown when another project has the same name. */
+  DirHint: string = "";
 
   constructor(model: Project) {
     this.Name = model.Name;
     this.Path = model.Path;
     this.CpmEnabled = model.CpmEnabled;
     this.Packages = model.Packages.map((x) => new ProjectPackageViewModel(x));
+    this.TransitivePackages = model.TransitivePackages ?? [];
+    this.AssetsStatus = model.AssetsStatus;
+  }
+}
+
+/**
+ * Sets DirHint for projects whose names collide ("Tests.csproj" in two folders), using as many
+ * parent folders as it takes to tell them apart.
+ */
+export function applyDirHints(projects: ProjectViewModel[]): void {
+  const byName = new Map<string, ProjectViewModel[]>();
+  for (const project of projects) {
+    project.DirHint = "";
+    const key = project.Name.toLowerCase();
+    byName.set(key, [...(byName.get(key) ?? []), project]);
+  }
+
+  for (const group of byName.values()) {
+    if (group.length < 2) continue;
+    // Folders of each project, closest first, without the file name
+    const folders = group.map((p) => p.Path.split(/[\\/]/).filter(Boolean).slice(0, -1).reverse());
+    const maxDepth = Math.max(...folders.map((f) => f.length));
+    for (let depth = 1; depth <= maxDepth; depth++) {
+      const hints = folders.map((f) => f.slice(0, depth).reverse().join("/"));
+      if (new Set(hints.map((h) => h.toLowerCase())).size === hints.length || depth === maxDepth) {
+        group.forEach((project, i) => (project.DirHint = hints[i]));
+        break;
+      }
+    }
   }
 }
 
@@ -125,6 +168,7 @@ export class OutdatedPackageViewModel {
   Projects: Array<{ Name: string; Path: string; Version: string }>;
   SourceUrl: string;
   SourceName: string;
+  InstalledDeprecation: PackageDeprecation | undefined;
   IsUpdating: boolean = false;
   Selected: boolean = false;
   Error: string | null = null;
@@ -136,6 +180,7 @@ export class OutdatedPackageViewModel {
     this.Projects = model.Projects;
     this.SourceUrl = model.SourceUrl;
     this.SourceName = model.SourceName;
+    this.InstalledDeprecation = model.InstalledDeprecation;
   }
 }
 
@@ -165,6 +210,8 @@ export class VulnerablePackageViewModel {
   AdvisoryUrl: string;
   AffectedVersionRange: string;
   Projects: Array<{ Name: string; Path: string }>;
+  IsTransitive: boolean;
+  ViaIds: string[];
 
   constructor(model: VulnerablePackage) {
     this.Id = model.Id;
@@ -174,6 +221,8 @@ export class VulnerablePackageViewModel {
     this.AdvisoryUrl = model.AdvisoryUrl;
     this.AffectedVersionRange = model.AffectedVersionRange;
     this.Projects = model.Projects;
+    this.IsTransitive = model.IsTransitive ?? false;
+    this.ViaIds = model.ViaIds ?? [];
   }
 }
 

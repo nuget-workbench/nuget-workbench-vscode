@@ -9,6 +9,7 @@ import { hostApi } from "@/web/registrations";
 import { OutdatedPackageViewModel, PackageViewModel } from "../types";
 import "./package-row";
 import { emitOperationLog } from "../operation-log";
+import { deprecationText } from "./package-row";
 
 @customElement("updates-view")
 export class UpdatesView extends LitElement {
@@ -54,6 +55,11 @@ export class UpdatesView extends LitElement {
             display: flex;
             align-items: center;
             flex-shrink: 0;
+          }
+
+          .row-deprecated {
+            flex-shrink: 0;
+            color: var(--vscode-editorWarning-foreground);
           }
         }
       }
@@ -320,6 +326,14 @@ export class UpdatesView extends LitElement {
             composed: true,
           }))}
         ></package-row>
+        ${pkg.InstalledDeprecation
+          ? html`<span
+              class="row-deprecated codicon codicon-warning"
+              role="img"
+              aria-label="${pkg.InstalledVersion} is deprecated: ${deprecationText(pkg.InstalledDeprecation)}"
+              title="${pkg.InstalledVersion} is deprecated: ${deprecationText(pkg.InstalledDeprecation)}"
+            ></span>`
+          : nothing}
         ${pkg.Error
           ? html`<span class="row-error" role="img" aria-label="Update failed: ${pkg.Error}" title=${pkg.Error}>
               <span class="codicon codicon-error"></span>

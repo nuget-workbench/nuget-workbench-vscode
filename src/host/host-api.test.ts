@@ -5,6 +5,9 @@ import { createHostAPI } from './host-api';
 import NuGetConfigResolver from './utilities/nuget-config-resolver';
 import CpmResolver from './utilities/cpm-resolver';
 import TaskExecutor from './utilities/task-executor';
+import ProjectParser from './utilities/project-parser';
+import AssetsReader from './utilities/assets-reader';
+import nugetApiFactory from './nuget/api-factory';
 import { Logger } from '../common/logger';
 
 suite('HostAPI Tests', () => {
@@ -105,6 +108,43 @@ suite('HostAPI Tests', () => {
                 '-s', 'https://settings-only/v3/index.json',
                 '-s', 'https://api.nuget.org/v3/index.json',
             ]);
+        });
+    });
+
+    suite('getVulnerablePackages', () => {
+        test('also reports vulnerable transitive packages, after the direct ones', async () => {
+            sandbox.stub(Logger, 'warn');
+            sandbox.stub(NuGetConfigResolver, 'GetWorkspaceSources').resolves([{ Name: 'nuget.org', Url: 'https://api.nuget.org/v3/index.json' }]);
+            sandbox.stub(vscode.workspace, 'findFiles').resolves([vscode.Uri.file('/repo/App/App.csproj')]);
+            sandbox.stub(CpmResolver, 'GetPackageVersions').resolves(null);
+            sandbox.stub(ProjectParser, 'Parse').resolves({
+                Name: 'App.csproj',
+                Path: '/repo/App/App.csproj',
+                Packages: [{ Id: 'Direct.Pkg', Version: '1.0.0', IsPinned: false, VersionSource: 'project' }],
+                CpmEnabled: false,
+            });
+            sandbox.stub(AssetsReader, 'Read').resolves({
+                Status: 'ok',
+                Packages: [
+                    { Id: 'Deep.Pkg', Version: '2.0.0', Frameworks: ['net8.0'], ViaIds: ['Direct.Pkg'] },
+                    { Id: 'Safe.Pkg', Version: '1.0.0', Frameworks: ['net8.0'], ViaIds: ['Direct.Pkg'] },
+                ],
+            });
+            sandbox.stub(nugetApiFactory, 'GetSourceApi').resolves({
+                GetVulnerabilitiesAsync: async () => new Map([
+                    ['deep.pkg', [{ url: 'https://advisory/deep', severity: 3, versions: '(, 2.1.0)' }]],
+                    ['direct.pkg', [{ url: 'https://advisory/direct', severity: 1, versions: '[1.0.0]' }]],
+                ]),
+            } as any);
+
+            const result = await createHostAPI().getVulnerablePackages({});
+
+            assert.ok(result.ok);
+            assert.deepStrictEqual(result.value.Packages.map((p) => `${p.Id}:${p.IsTransitive ?? false}`), [
+                'Direct.Pkg:false',
+                'Deep.Pkg:true',
+            ]);
+            assert.deepStrictEqual(result.value.Packages[1].ViaIds, ['Direct.Pkg']);
         });
     });
 });
