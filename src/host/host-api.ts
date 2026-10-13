@@ -665,8 +665,8 @@ export function createHostAPI(): HostAPI {
         >();
         for (const project of projects) {
           for (const pkg of project.TransitivePackages ?? []) {
+            // A package that is direct in another project is still transitive here, with its own fix
             const key = `${pkg.Id.toLowerCase()}::${normalizeVersion(pkg.Version)}`;
-            if (installedMap.has(key)) continue;
             let entry = transitiveMap.get(key);
             if (!entry) {
               entry = { id: pkg.Id, version: pkg.Version, projects: [], via: new Set() };

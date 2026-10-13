@@ -146,5 +146,43 @@ suite('HostAPI Tests', () => {
             ]);
             assert.deepStrictEqual(result.value.Packages[1].ViaIds, ['Direct.Pkg']);
         });
+
+        test('reports a package that is direct in one project and transitive in another for both', async () => {
+            sandbox.stub(Logger, 'warn');
+            sandbox.stub(NuGetConfigResolver, 'GetWorkspaceSources').resolves([{ Name: 'nuget.org', Url: 'https://api.nuget.org/v3/index.json' }]);
+            sandbox.stub(vscode.workspace, 'findFiles').resolves([
+                vscode.Uri.file('/repo/A/A.csproj'),
+                vscode.Uri.file('/repo/B/B.csproj'),
+            ]);
+            sandbox.stub(CpmResolver, 'GetPackageVersions').resolves(null);
+            const parse = sandbox.stub(ProjectParser, 'Parse');
+            parse.onFirstCall().resolves({
+                Name: 'A.csproj', Path: '/repo/A/A.csproj', CpmEnabled: false,
+                Packages: [{ Id: 'Vulnerable.Pkg', Version: '1.0.0', IsPinned: false, VersionSource: 'project' }],
+            });
+            parse.onSecondCall().resolves({
+                Name: 'B.csproj', Path: '/repo/B/B.csproj', CpmEnabled: false,
+                Packages: [{ Id: 'Parent', Version: '1.0.0', IsPinned: false, VersionSource: 'project' }],
+            });
+            const assets = sandbox.stub(AssetsReader, 'Read');
+            assets.onFirstCall().resolves({ Status: 'ok', Packages: [] });
+            assets.onSecondCall().resolves({
+                Status: 'ok',
+                Packages: [{ Id: 'Vulnerable.Pkg', Version: '1.0.0', Frameworks: ['net8.0'], ViaIds: ['Parent'] }],
+            });
+            sandbox.stub(nugetApiFactory, 'GetSourceApi').resolves({
+                GetVulnerabilitiesAsync: async () => new Map([
+                    ['vulnerable.pkg', [{ url: 'https://advisory', severity: 2, versions: '[1.0.0]' }]],
+                ]),
+            } as any);
+
+            const result = await createHostAPI().getVulnerablePackages({});
+
+            assert.ok(result.ok);
+            assert.deepStrictEqual(
+                result.value.Packages.map((p) => `${p.Projects.map((x) => x.Name).join(',')}:${p.IsTransitive ?? false}`),
+                ['A.csproj:false', 'B.csproj:true']
+            );
+        });
     });
 });

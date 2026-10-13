@@ -150,6 +150,19 @@ suite('NuGetConfigResolver Tests', () => {
             const paths = (NuGetConfigResolver as any).FindAllConfigFiles(undefined);
             assert.ok(paths.includes(machineConfig));
         });
+
+        test('Returns every machine-wide config on Windows', () => {
+            Object.defineProperty(process, 'platform', { value: 'win32' });
+
+            const offline = writeConfig(programFilesDir, 'NuGet/Config/Microsoft.VisualStudio.Offline.config', '<configuration/>');
+            const company = writeConfig(programFilesDir, 'NuGet/Config/Company.config', '<configuration/>');
+            writeConfig(programFilesDir, 'NuGet/Config/readme.txt', '');
+
+            const paths: string[] = (NuGetConfigResolver as any).FindAllConfigFiles(undefined);
+            const machinePaths = paths.filter(p => p.startsWith(path.join(programFilesDir, 'NuGet', 'Config')));
+
+            assert.deepStrictEqual(machinePaths, [company, offline]);
+        });
     });
 
     // ... Rest of the tests (ParseConfigFile, etc.) are file-path independent or use paths we pass directly ...
@@ -619,6 +632,19 @@ suite('NuGetConfigResolver Tests', () => {
 
             assert.strictEqual(parsedOnce, 1);
             assert.ok(sources.find(s => s.Name === 'Changed'));
+        });
+
+        test('Parses the files once for concurrent calls', async () => {
+            const configPath = writeConfig(workspaceDir, 'nuget.config', feeds('Root', 'http://root'));
+            const parseSpy = sandbox.spy(NuGetConfigResolver as any, 'ParseConfigFile');
+
+            await Promise.all([
+                NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir),
+                NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir),
+                NuGetConfigResolver.GetBlockedSourceNames(workspaceDir),
+            ]);
+
+            assert.strictEqual(parseSpy.getCalls().filter(c => c.args[0] === configPath).length, 1);
         });
 
         test('Returns copies that callers may change', async () => {

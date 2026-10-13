@@ -195,4 +195,64 @@ suite('SearchBar Component', () => {
         assert.strictEqual(options[2].value, "C:/LocalSource");
         assert.strictEqual(options[2].label, "Local");
     });
+
+    suite('configuration changes outside the view', () => {
+        function changeConfiguration(update: Record<string, unknown>) {
+            Object.assign((configuration as any)['configuration'], update);
+            // The listener is what configuration.Reload() notifies; JSDOM's Event cannot be dispatched on it here
+            (searchBar as any).onConfigurationChanged();
+        }
+
+        function collectFilters() {
+            const events: any[] = [];
+            searchBar.addEventListener('filter-changed', (e) => events.push((e as CustomEvent).detail));
+            return events;
+        }
+
+        test('applies a changed prerelease setting and searches again', () => {
+            const events = collectFilters();
+
+            changeConfiguration({ Prerelease: false });
+
+            assert.strictEqual(searchBar.prerelease, false);
+            assert.strictEqual(events.length, 1);
+            assert.strictEqual(events[0].Prerelease, false);
+        });
+
+        test('does not search again for its own prerelease toggle', () => {
+            searchBar.prerelease = false;
+            const events = collectFilters();
+
+            changeConfiguration({ Prerelease: false });
+
+            assert.strictEqual(events.length, 0);
+        });
+
+        test('follows a changed default source unless another source was picked', () => {
+            const events = collectFilters();
+
+            changeConfiguration({ DefaultSource: 'Local' });
+            assert.strictEqual(searchBar.selectedSourceUrl, 'C:/LocalSource');
+
+            searchBar.selectedSourceUrl = 'https://api.nuget.org/v3/index.json';
+            changeConfiguration({ DefaultSource: '' });
+            assert.strictEqual(searchBar.selectedSourceUrl, 'https://api.nuget.org/v3/index.json');
+            assert.strictEqual(events.length, 1);
+        });
+
+        test('searches again when the sources change while "All" is selected', () => {
+            const events = collectFilters();
+
+            changeConfiguration({
+                Sources: [
+                    { Name: 'NuGet.org', Url: 'https://api.nuget.org/v3/index.json' },
+                    { Name: 'Local', Url: 'C:/LocalSource' },
+                    { Name: 'Company', Url: 'https://feed.example.com/v3/index.json' },
+                ],
+            });
+
+            assert.strictEqual(events.length, 1);
+            assert.strictEqual(events[0].SourceUrl, '');
+        });
+    });
 });

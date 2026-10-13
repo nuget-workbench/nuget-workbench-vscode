@@ -48,7 +48,7 @@ export function normalizeSourceUrl(url: string): string {
 export default class NuGetConfigResolver {
   private static readonly CONFIG_FILENAMES = ["nuget.config", "NuGet.config", "NuGet.Config"];
   // Keyed by the config file paths and their modification stamps
-  private static resolvedCache = new Map<string, ResolvedConfig>();
+  private static resolvedCache = new Map<string, Promise<ResolvedConfig>>();
   private static workspaceDirs: Promise<Array<string | undefined>> | null = null;
 
   static async GetSourcesAndDecodePasswords(startDir?: string): Promise<SourceWithCredentials[]> {
@@ -128,11 +128,17 @@ export default class NuGetConfigResolver {
     );
     const key = stamps.join("|");
 
-    let resolved = this.resolvedCache.get(key);
-    if (!resolved) {
-      resolved = await this.ResolveConfigFiles(configPaths);
-      this.resolvedCache.set(key, resolved);
+    // The promise is cached, so concurrent calls (several feeds at start-up) parse the files once
+    let pending = this.resolvedCache.get(key);
+    if (!pending) {
+      const created = this.ResolveConfigFiles(configPaths);
+      pending = created;
+      this.resolvedCache.set(key, created);
+      created.catch(() => {
+        if (this.resolvedCache.get(key) === created) this.resolvedCache.delete(key);
+      });
     }
+    const resolved = await pending;
     return {
       sources: resolved.sources.map((s) => ({ ...s })),
       blockedNames: new Set(resolved.blockedNames),
@@ -374,7 +380,15 @@ export default class NuGetConfigResolver {
     if (process.platform === "win32") {
       const programFiles = process.env["ProgramFiles(x86)"] || process.env["ProgramFiles"];
       if (programFiles) {
-        add(path.join(programFiles, "NuGet", "Config", "Microsoft.VisualStudio.Offline.config"));
+        // Every .config file there applies, not only the one Visual Studio installs
+        const machineDir = path.join(programFiles, "NuGet", "Config");
+        let names: string[] = [];
+        try {
+          names = fs.readdirSync(machineDir).filter((name) => name.toLowerCase().endsWith(".config"));
+        } catch {
+          // No machine-wide configuration
+        }
+        names.sort((a, b) => a.localeCompare(b)).forEach((name) => add(path.join(machineDir, name)));
       }
     }
 

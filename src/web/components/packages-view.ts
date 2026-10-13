@@ -383,9 +383,13 @@ export class PackagesView extends LitElement {
       SourceUrl: configuration.DefaultSourceUrl,
       Prerelease: configuration.Configuration?.Prerelease ?? false,
     };
+    // The output log's expandOnError follows the "showOutputOnError" setting
+    configuration.addEventListener("configuration-changed", this.onConfigurationChanged);
     // LoadPackages is triggered by search-bar's connectedCallback emitting filter-changed
     this.LoadProjects();
   }
+
+  private onConfigurationChanged = (): void => this.requestUpdate();
 
   firstUpdated(): void {
     this.initSplitter();
@@ -393,6 +397,7 @@ export class PackagesView extends LitElement {
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
+    configuration.removeEventListener("configuration-changed", this.onConfigurationChanged);
     this.splitter?.destroy();
     this.debouncedLoadProjectsPackages.cancel();
     this.debouncedReloadChildViews.cancel();

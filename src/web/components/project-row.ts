@@ -137,7 +137,11 @@ export class ProjectRow extends LitElement {
       project.Packages = result.value.Project.Packages.map(
         (x) => new ProjectPackageViewModel(x)
       );
-      emitOperationLog(this, `${project.Name}: ${request.PackageId}${versionText} ${type === "UNINSTALL" ? "uninstalled" : "installed"}`, "success");
+      // The restore changed the transitive packages as well
+      project.TransitivePackages = result.value.Project.TransitivePackages ?? [];
+      project.AssetsStatus = result.value.Project.AssetsStatus;
+      const done = type === "INSTALL" ? "installed" : type === "UPDATE" ? "updated" : "uninstalled";
+      emitOperationLog(this, `${project.Name}: ${request.PackageId}${versionText} ${done}`, "success");
       if (notify) {
         this.dispatchEvent(
           new CustomEvent("project-updated", {

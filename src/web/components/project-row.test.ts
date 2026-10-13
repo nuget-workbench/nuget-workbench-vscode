@@ -303,4 +303,27 @@ suite('ProjectRow Component', () => {
         assert.strictEqual(projectRow.shadowRoot?.querySelector('.version.transitive')?.textContent?.trim(), '0.9.0 (transitive)');
         assert.strictEqual(projectRow.shadowRoot?.querySelector('.icon-btn')?.getAttribute('title'), 'Add direct reference 1.0.0');
     });
+
+    test('run() keeps the transitive packages returned for the project and logs an update as updated', async () => {
+        mockHostApi.updateProject = async () => ok({
+            Project: {
+                Name: 'TestProject',
+                Path: 'path/to/project',
+                Packages: [{ Id: 'TestPackage', Version: '2.0.0', IsPinned: false, VersionSource: 'project' }],
+                CpmEnabled: false,
+                TransitivePackages: [{ Id: 'Dep', Version: '1.0.0', Frameworks: ['net8.0'], ViaIds: ['TestPackage'] }],
+                AssetsStatus: 'ok',
+            },
+            IsCpmEnabled: false,
+        });
+        projectRow.packageVersion = '2.0.0';
+        const entries: Array<{ text: string; level: string }> = [];
+        projectRow.addEventListener('operation-log', (e) => entries.push((e as CustomEvent).detail));
+
+        await projectRow.run('UPDATE');
+
+        assert.deepStrictEqual(projectRow.project.TransitivePackages.map(p => p.Id), ['Dep']);
+        assert.strictEqual(projectRow.project.AssetsStatus, 'ok');
+        assert.strictEqual(entries[1].text, 'TestProject: TestPackage 2.0.0 updated');
+    });
 });
