@@ -9,6 +9,7 @@ import { scrollableBase } from "@/web/styles/base.css";
 import { sharedStyles } from "@/web/styles/shared.css";
 import { hostApi } from "@/web/registrations";
 import { InconsistentPackageViewModel } from "../types";
+import { emitOperationLog } from "../operation-log";
 
 @customElement("consolidate-view")
 export class ConsolidateView extends LitElement {
@@ -218,6 +219,7 @@ export class ConsolidateView extends LitElement {
     pkg.IsConsolidating = true;
     pkg.Error = null;
     this.requestUpdate();
+    emitOperationLog(this, `Consolidating ${pkg.Id} to ${pkg.TargetVersion}...`);
     try {
       const allProjects = pkg.Versions.flatMap((v) => v.Projects.map((p) => p.Path));
       const result = await hostApi.consolidatePackages({
@@ -227,11 +229,14 @@ export class ConsolidateView extends LitElement {
       });
       if (!result.ok) {
         pkg.Error = result.error;
+        emitOperationLog(this, `${pkg.Id}: ${result.error}`, "error");
         return false;
       }
+      emitOperationLog(this, `${pkg.Id} consolidated to ${pkg.TargetVersion}`, "success");
       return true;
     } catch (e) {
       pkg.Error = e instanceof Error ? e.message : String(e);
+      emitOperationLog(this, `${pkg.Id}: ${pkg.Error}`, "error");
       return false;
     } finally {
       pkg.IsConsolidating = false;

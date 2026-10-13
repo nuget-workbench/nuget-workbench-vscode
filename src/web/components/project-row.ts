@@ -4,8 +4,18 @@ import codicon from "@/web/styles/codicon.css";
 import { sharedStyles } from "@/web/styles/shared.css";
 import { hostApi } from "../registrations";
 import { ProjectPackageViewModel, ProjectViewModel } from "../types";
-import type { UpdateProjectRequest } from "@/common/rpc/types";
+import type { UpdateProjectRequest, UpdateProjectResponse } from "@/common/rpc/types";
 import { compareVersions, isNonConcreteVersion } from "@/common/version";
+import { emitOperationLog } from "../operation-log";
+
+export type ProjectOperation = "INSTALL" | "UNINSTALL" | "UPDATE";
+
+/** True when the installed package can be moved to the target version from the UI. */
+export function canChangeVersion(pkg: ProjectPackageViewModel, target: string): boolean {
+  const cmp = pkg.Version && target ? compareVersions(target, pkg.Version) : 0;
+  // "$(Prop)", floating and range versions would be replaced by a fixed version
+  return cmp !== 0 && !pkg.IsPinned && !isNonConcreteVersion(pkg.Version ?? "");
+}
 
 const styles = css`
   .project-row {
@@ -29,6 +39,10 @@ const styles = css`
       .name {
         font-weight: bold;
       }
+      .dir-hint {
+        margin-left: 4px;
+        color: var(--vscode-descriptionForeground);
+      }
     }
 
     .project-actions {
@@ -43,6 +57,18 @@ const styles = css`
       .version {
         font-family: var(--vscode-editor-font-family);
         font-size: 12px;
+      }
+
+      .version.transitive {
+        color: var(--vscode-descriptionForeground);
+      }
+
+      .version-source {
+        font-size: 9px;
+        padding: 0 3px;
+        border-radius: 3px;
+        border: 1px solid var(--vscode-panelSection-border);
+        color: var(--vscode-descriptionForeground);
       }
 
       .row-error {
@@ -68,13 +94,21 @@ export class ProjectRow extends LitElement {
     return this.project.Packages.find((x) => x.Id.toLowerCase() === id);
   }
 
-  private async update_(type: "INSTALL" | "UNINSTALL" | "UPDATE"): Promise<void> {
-    if (type === "UNINSTALL") {
-      const confirm = await hostApi.showConfirmation({
+  /**
+   * Installs, updates or uninstalls the package in this row's project. The bulk actions of the
+   * details pane skip the confirmation (they ask once) and the reload event (they reload once).
+   * Returns null when the operation failed or was cancelled.
+   */
+  async run(
+    type: ProjectOperation,
+    { confirm = true, notify = true }: { confirm?: boolean; notify?: boolean } = {}
+  ): Promise<UpdateProjectResponse | null> {
+    if (type === "UNINSTALL" && confirm) {
+      const answer = await hostApi.showConfirmation({
         Message: `Uninstall ${this.packageId}?`,
         Detail: `This will remove ${this.packageId} from ${this.project.Name}.`,
       });
-      if (!confirm.ok || !confirm.value.Confirmed) return;
+      if (!answer.ok || !answer.value.Confirmed) return null;
     }
 
     // The row can be given another project while dotnet runs; the result belongs to this one
@@ -91,24 +125,37 @@ export class ProjectRow extends LitElement {
     this.errors.delete(request.PackageId);
     this.requestUpdate();
 
+    const action = type === "INSTALL" ? "Installing" : type === "UPDATE" ? "Updating" : "Uninstalling";
+    const versionText = type === "UNINSTALL" || !request.Version ? "" : ` ${request.Version}`;
+    emitOperationLog(this, `${action} ${request.PackageId}${versionText} in ${project.Name}...`);
+
     const result = await hostApi.updateProject(request);
     if (!result.ok) {
       this.errors.set(request.PackageId, result.error);
+      emitOperationLog(this, `${project.Name}: ${result.error}`, "error");
     } else {
       project.Packages = result.value.Project.Packages.map(
         (x) => new ProjectPackageViewModel(x)
       );
-      this.dispatchEvent(
-        new CustomEvent("project-updated", {
-          detail: { isCpmEnabled: result.value.IsCpmEnabled },
-          bubbles: true,
-          composed: true,
-        })
-      );
+      // The restore changed the transitive packages as well
+      project.TransitivePackages = result.value.Project.TransitivePackages ?? [];
+      project.AssetsStatus = result.value.Project.AssetsStatus;
+      const done = type === "INSTALL" ? "installed" : type === "UPDATE" ? "updated" : "uninstalled";
+      emitOperationLog(this, `${project.Name}: ${request.PackageId}${versionText} ${done}`, "success");
+      if (notify) {
+        this.dispatchEvent(
+          new CustomEvent("project-updated", {
+            detail: { isCpmEnabled: result.value.IsCpmEnabled },
+            bubbles: true,
+            composed: true,
+          })
+        );
+      }
     }
 
     this.loaders.delete(request.PackageId);
     this.requestUpdate();
+    return result.ok ? result.value : null;
   }
 
   private renderActions() {
@@ -128,26 +175,37 @@ export class ProjectRow extends LitElement {
     const target = this.packageVersion;
 
     if (pkg === undefined) {
+      const id = this.packageId?.toLowerCase();
+      const transitive = this.project.TransitivePackages.find((x) => x.Id.toLowerCase() === id);
+      const installLabel = transitive ? "Add direct reference" : "Install";
       return html`
         ${errorIcon}
+        ${transitive
+          ? html`<span class="version transitive" title="Transitive, pulled in by ${transitive.ViaIds.join(", ")}"
+              >${transitive.Version} (transitive)</span
+            >`
+          : nothing}
         <button
           class="icon-btn"
-          aria-label="Install ${this.packageId}${target ? ` ${target}` : ""} in ${this.project.Name}"
-          title=${target ? `Install ${target}` : "Install"}
-          @click=${() => this.update_("INSTALL")}
+          aria-label="${installLabel} ${this.packageId}${target ? ` ${target}` : ""} in ${this.project.Name}"
+          title=${target ? `${installLabel} ${target}` : installLabel}
+          @click=${() => this.run("INSTALL")}
         >
           <span class="codicon codicon-diff-added"></span>
         </button>
       `;
     }
 
-    const cmp = version && target ? compareVersions(target, version) : 0;
-    // "$(Prop)", floating and range versions would be replaced by a fixed version
-    const canChange = cmp !== 0 && !pkg.IsPinned && !isNonConcreteVersion(version ?? "");
-    const isDowngrade = canChange && cmp < 0;
+    const canChange = canChangeVersion(pkg, target);
+    const isDowngrade = canChange && compareVersions(target, version ?? "") < 0;
 
     return html`
       ${errorIcon}
+      ${pkg.VersionSource === "central"
+        ? html`<span class="version-source" title="Version from Directory.Packages.props">CPM</span>`
+        : pkg.VersionSource === "override"
+          ? html`<span class="version-source" title="VersionOverride in the project file">override</span>`
+          : nothing}
       <span class="version" title=${pkg.IsPinned ? "Pinned version" : ""}>${version}</span>
       ${canChange
         ? html`
@@ -155,7 +213,7 @@ export class ProjectRow extends LitElement {
               class="icon-btn"
               aria-label="${isDowngrade ? "Downgrade" : "Update"} ${this.packageId} to ${target} in ${this.project.Name}"
               title="${isDowngrade ? "Downgrade" : "Update"} to ${target}"
-              @click=${() => this.update_("UPDATE")}
+              @click=${() => this.run("UPDATE")}
             >
               <span class="codicon ${isDowngrade ? "codicon-arrow-circle-down" : "codicon-arrow-circle-up"}"></span>
             </button>
@@ -165,7 +223,7 @@ export class ProjectRow extends LitElement {
         class="icon-btn"
         aria-label="Uninstall ${this.packageId} from ${this.project.Name}"
         title="Uninstall"
-        @click=${() => this.update_("UNINSTALL")}
+        @click=${() => this.run("UNINSTALL")}
       >
         <span class="codicon codicon-diff-removed"></span>
       </button>
@@ -177,6 +235,7 @@ export class ProjectRow extends LitElement {
       <div class="project-row">
         <div class="project-title" title=${this.project.Path}>
           <span class="name">${this.project.Name}</span>
+          ${this.project.DirHint ? html`<span class="dir-hint">${this.project.DirHint}</span>` : nothing}
         </div>
         <div class="project-actions">${this.renderActions()}</div>
       </div>

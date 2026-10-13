@@ -1,4 +1,4 @@
-import { LitElement, css, html } from "lit";
+import { LitElement, css, html, nothing } from "lit";
 import { customElement, property } from "lit/decorators.js";
 import codicon from "@/web/styles/codicon.css";
 import { scrollableBase } from "@/web/styles/base.css";
@@ -61,6 +61,20 @@ const styles = css`
         overflow: hidden;
         text-overflow: ellipsis;
         font-size: 11px;
+      }
+
+      .dir-hint {
+        color: var(--vscode-descriptionForeground);
+        font-weight: normal;
+      }
+
+      .cpm-badge {
+        flex-shrink: 0;
+        font-size: 9px;
+        padding: 0 3px;
+        border-radius: 3px;
+        border: 1px solid var(--vscode-panelSection-border);
+        color: var(--vscode-descriptionForeground);
       }
     }
   }
@@ -141,7 +155,12 @@ export class ProjectTree extends LitElement {
                     )}
                 />
                 <span class="codicon codicon-file-code"></span>
-                <span class="item-label" title=${p.Path}>${p.Name}</span>
+                <span class="item-label" title=${p.Path}
+                  >${p.Name}${p.DirHint ? html` <span class="dir-hint">${p.DirHint}</span>` : nothing}</span
+                >
+                ${p.CpmEnabled
+                  ? html`<span class="cpm-badge" title="Versions are managed centrally in Directory.Packages.props">CPM</span>`
+                  : nothing}
               </div>
             `
           )}

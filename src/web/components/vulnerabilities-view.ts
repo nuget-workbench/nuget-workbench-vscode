@@ -45,6 +45,14 @@ export class VulnerabilitiesView extends LitElement {
             align-items: center;
             gap: 8px;
 
+            .transitive-tag {
+              font-size: 10px;
+              padding: 0 4px;
+              border: 1px solid var(--vscode-panelSection-border);
+              border-radius: 3px;
+              color: var(--vscode-descriptionForeground);
+            }
+
             .severity-badge {
               font-size: 10px;
               font-weight: bold;
@@ -106,6 +114,12 @@ export class VulnerabilitiesView extends LitElement {
             .project-list {
               color: var(--vscode-descriptionForeground);
               margin-top: 2px;
+            }
+
+            .remediation {
+              margin-top: 2px;
+              color: var(--vscode-descriptionForeground);
+              font-style: italic;
             }
           }
         }
@@ -209,6 +223,9 @@ export class VulnerabilitiesView extends LitElement {
             ${pkg.SeverityLabel}
           </span>
           <button class="link-btn package-name" title="Show ${pkg.Id} details" @click=${() => this.selectPackage(pkg.Id)}>${pkg.Id}</button>
+          ${pkg.IsTransitive
+            ? html`<span class="transitive-tag" title="Not referenced directly">transitive via ${pkg.ViaIds.join(", ")}</span>`
+            : nothing}
           <a
             class="advisory-link"
             href=${pkg.AdvisoryUrl}
@@ -230,6 +247,12 @@ export class VulnerabilitiesView extends LitElement {
           <div class="project-list">
             ${pkg.Projects.map((p) => p.Name).join(", ")}
           </div>
+          ${pkg.IsTransitive
+            ? html`<div class="remediation">
+                Update ${pkg.ViaIds.join(" or ")}, or add a direct reference to ${pkg.Id} with a version outside
+                ${pkg.AffectedVersionRange}.
+              </div>`
+            : nothing}
         </div>
       </div>
     `;

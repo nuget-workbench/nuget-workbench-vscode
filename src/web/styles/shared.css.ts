@@ -89,6 +89,24 @@ export const sharedStyles = css`
     cursor: default;
   }
 
+  /* --- Secondary button --- */
+  button.secondary-btn {
+    background: var(--vscode-button-secondaryBackground);
+    color: var(--vscode-button-secondaryForeground);
+    border: none;
+    padding: 3px 10px;
+    cursor: pointer;
+  }
+
+  button.secondary-btn:hover:not(:disabled) {
+    background: var(--vscode-button-secondaryHoverBackground);
+  }
+
+  button.secondary-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+
   /* --- Select / Dropdown --- */
   select {
     appearance: none;

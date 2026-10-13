@@ -154,6 +154,18 @@ const styles = css`
         font-weight: bold;
       }
     }
+
+    .transitive-tag {
+      font-size: 10px;
+      padding: 0 4px;
+      border: 1px solid var(--vscode-panelSection-border);
+      border-radius: 3px;
+      color: var(--vscode-descriptionForeground);
+    }
+
+    .deprecated {
+      color: var(--vscode-editorWarning-foreground);
+    }
   }
 `;
 
@@ -214,6 +226,25 @@ export class PackageRow extends LitElement {
     }
 
     const installed = this.package.InstalledVersion;
+    const deprecation = this.package.GetDeprecation(installed);
+    const deprecationIcon = deprecation
+      ? html`<span
+          class="codicon codicon-warning deprecated"
+          role="img"
+          aria-label="Deprecated: ${deprecationText(deprecation)}"
+          title="Deprecated: ${deprecationText(deprecation)}"
+        ></span>`
+      : nothing;
+
+    // Transitive packages are only loaded when selected and cannot be updated directly
+    if (this.package.IsTransitive) {
+      return html`
+        ${installed}
+        <span class="transitive-tag" title="Transitive, pulled in by ${this.package.ViaIds.join(", ")}">transitive</span>
+        ${deprecationIcon}
+      `;
+    }
+
     const hasUpdate =
       this.package.Status === "Detailed" &&
       this.package.AllowsUpdate &&
@@ -232,6 +263,7 @@ export class PackageRow extends LitElement {
             title="Failed to fetch package information"
           ></span>`
         : nothing}
+      ${deprecationIcon}
       ${hasUpdate
         ? html`<span
             class="codicon codicon-arrow-circle-up"
@@ -297,4 +329,12 @@ export class PackageRow extends LitElement {
       </div>
     `;
   }
+}
+
+export function deprecationText(deprecation: PackageDeprecation): string {
+  const reasons = deprecation.Reasons.map((r) => (r === "CriticalBugs" ? "critical bugs" : r === "Legacy" ? "legacy" : r.toLowerCase()));
+  const parts = [reasons.length > 0 ? reasons.join(", ") : "deprecated by the author"];
+  if (deprecation.Message) parts.push(deprecation.Message);
+  if (deprecation.AlternatePackage) parts.push(`use ${deprecation.AlternatePackage.Id} instead`);
+  return parts.join(". ");
 }

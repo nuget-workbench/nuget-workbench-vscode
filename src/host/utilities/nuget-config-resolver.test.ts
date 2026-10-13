@@ -77,6 +77,10 @@ suite('NuGetConfigResolver Tests', () => {
         }
     });
 
+    function stubResolve(sources: Array<{ Name: string; Url: string; Username?: string; Password?: string }>) {
+        return sandbox.stub(NuGetConfigResolver, 'Resolve').resolves({ sources, blockedNames: new Set<string>() });
+    }
+
     // Helper to write config file
     function writeConfig(dir: string, subPath: string, content: string) {
         const fullPath = path.join(dir, subPath);
@@ -145,6 +149,19 @@ suite('NuGetConfigResolver Tests', () => {
 
             const paths = (NuGetConfigResolver as any).FindAllConfigFiles(undefined);
             assert.ok(paths.includes(machineConfig));
+        });
+
+        test('Returns every machine-wide config on Windows', () => {
+            Object.defineProperty(process, 'platform', { value: 'win32' });
+
+            const offline = writeConfig(programFilesDir, 'NuGet/Config/Microsoft.VisualStudio.Offline.config', '<configuration/>');
+            const company = writeConfig(programFilesDir, 'NuGet/Config/Company.config', '<configuration/>');
+            writeConfig(programFilesDir, 'NuGet/Config/readme.txt', '');
+
+            const paths: string[] = (NuGetConfigResolver as any).FindAllConfigFiles(undefined);
+            const machinePaths = paths.filter(p => p.startsWith(path.join(programFilesDir, 'NuGet', 'Config')));
+
+            assert.deepStrictEqual(machinePaths, [company, offline]);
         });
     });
 
@@ -432,7 +449,7 @@ suite('NuGetConfigResolver Tests', () => {
     suite('GetSourcesAndDecodePasswords', () => {
         test('Uses VS Code configuration sources', async () => {
             // Mock empty file sources
-            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([]);
+            stubResolve([]);
 
             vscodeGetConfigurationStub.returns({
                 get: (key: string) => {
@@ -451,7 +468,7 @@ suite('NuGetConfigResolver Tests', () => {
 
         test('Decodes password when passwordScriptPath is provided', async () => {
             const source = { Name: 'SecureSource', Url: 'http://secure', Password: 'Encrypted' };
-            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([source]);
+            stubResolve([source]);
 
             vscodeGetConfigurationStub.returns({
                 get: (key: string) => {
@@ -474,7 +491,7 @@ suite('NuGetConfigResolver Tests', () => {
 
         test('Handles password decoding failure', async () => {
             const source = { Name: 'SecureSource', Url: 'http://secure', Password: 'Encrypted' };
-            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([source]);
+            stubResolve([source]);
 
             vscodeGetConfigurationStub.returns({
                 get: (key: string) => {
@@ -499,7 +516,7 @@ suite('NuGetConfigResolver Tests', () => {
         });
 
         test('Tags sources with their origin', async () => {
-            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([{ Name: 'ConfigFeed', Url: 'http://config' }]);
+            stubResolve([{ Name: 'ConfigFeed', Url: 'http://config' }]);
             vscodeGetConfigurationStub.returns({
                 get: (key: string) => key === 'sources'
                     ? [JSON.stringify({ name: 'SettingsFeed', url: 'http://settings' })]
@@ -535,7 +552,7 @@ suite('NuGetConfigResolver Tests', () => {
         });
 
         test('Does not run password scripts when decoding is not requested', async () => {
-            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([
+            stubResolve([
                 { Name: 'SecureSource', Url: 'http://secure', Password: 'Encrypted' }
             ]);
             vscodeGetConfigurationStub.returns({
@@ -552,12 +569,136 @@ suite('NuGetConfigResolver Tests', () => {
 
         test('Caches credentials even without script', async () => {
              const source = { Name: 'PlainSource', Url: 'http://plain', Username: 'user', Password: 'password' };
-             sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([source]);
+             stubResolve([source]);
              vscodeGetConfigurationStub.returns({ get: () => [] });
 
              await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceDir);
 
              assert.ok(credentialsCacheSetStub.calledWith('PlainSource', 'user', 'password'));
+        });
+    });
+
+    suite('Config hierarchy', () => {
+        const feeds = (key: string, url: string, clear = false) => `
+            <configuration>
+                <packageSources>
+                    ${clear ? '<clear />' : ''}
+                    <add key="${key}" value="${url}" />
+                </packageSources>
+            </configuration>`;
+
+        test('Walks from the project folder up to the workspace root, closest first', async () => {
+            writeConfig(workspaceDir, 'nuget.config', feeds('Root', 'http://root'));
+            writeConfig(workspaceDir, 'src/nuget.config', feeds('Src', 'http://src'));
+            const projectDir = path.join(workspaceDir, 'src', 'App');
+            fs.mkdirSync(projectDir, { recursive: true });
+
+            const paths: string[] = (NuGetConfigResolver as any).FindAllConfigFiles(projectDir);
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(projectDir);
+
+            assert.ok(paths.indexOf(path.join(workspaceDir, 'src', 'nuget.config')) < paths.indexOf(path.join(workspaceDir, 'nuget.config')));
+            assert.deepStrictEqual(sources.filter(s => s.Url.startsWith('http://')).map(s => s.Name), ['Src', 'Root']);
+        });
+
+        test('A <clear/> in a nested config hides the sources of the parent folders', async () => {
+            writeConfig(workspaceDir, 'nuget.config', feeds('Root', 'http://root'));
+            writeConfig(workspaceDir, 'src/nuget.config', feeds('Src', 'http://src', true));
+
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(path.join(workspaceDir, 'src'));
+
+            assert.deepStrictEqual(sources.map(s => s.Name), ['Src']);
+        });
+
+        test('Resolves a relative local feed against its config file', async () => {
+            writeConfig(workspaceDir, 'nuget.config', feeds('Local', './packages'));
+
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+
+            assert.strictEqual(sources.find(s => s.Name === 'Local')?.Url, path.join(workspaceDir, 'packages'));
+        });
+
+        test('Parses each config file once until it changes', async () => {
+            const configPath = writeConfig(workspaceDir, 'nuget.config', feeds('Root', 'http://root'));
+            const parseSpy = sandbox.spy(NuGetConfigResolver as any, 'ParseConfigFile');
+
+            await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+            await NuGetConfigResolver.GetBlockedSourceNames(workspaceDir);
+            const parsedOnce = parseSpy.getCalls().filter(c => c.args[0] === configPath).length;
+
+            fs.writeFileSync(configPath, feeds('Changed', 'http://changed-feed'));
+            const future = new Date(Date.now() + 5000);
+            fs.utimesSync(configPath, future, future);
+            const sources = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+
+            assert.strictEqual(parsedOnce, 1);
+            assert.ok(sources.find(s => s.Name === 'Changed'));
+        });
+
+        test('Parses the files once for concurrent calls', async () => {
+            const configPath = writeConfig(workspaceDir, 'nuget.config', feeds('Root', 'http://root'));
+            const parseSpy = sandbox.spy(NuGetConfigResolver as any, 'ParseConfigFile');
+
+            await Promise.all([
+                NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir),
+                NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir),
+                NuGetConfigResolver.GetBlockedSourceNames(workspaceDir),
+            ]);
+
+            assert.strictEqual(parseSpy.getCalls().filter(c => c.args[0] === configPath).length, 1);
+        });
+
+        test('Returns copies that callers may change', async () => {
+            writeConfig(workspaceDir, 'nuget.config', feeds('Root', 'http://root'));
+
+            const first = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+            first.find(s => s.Name === 'Root')!.Password = 'changed';
+            const second = await NuGetConfigResolver.GetSourcesWithCredentials(workspaceDir);
+
+            assert.strictEqual(second.find(s => s.Name === 'Root')!.Password, undefined);
+        });
+    });
+
+    suite('Workspace sources', () => {
+        let otherFolder: string;
+
+        setup(() => {
+            otherFolder = path.join(tempDir, 'other');
+            fs.mkdirSync(otherFolder);
+            vscodeGetConfigurationStub.returns({ get: () => [] });
+            sandbox.stub(vscode.workspace, 'workspaceFolders').value([
+                { uri: { fsPath: workspaceDir } },
+                { uri: { fsPath: otherFolder } },
+            ]);
+        });
+
+        test('Combines the sources of all workspace folders and nested configs', async () => {
+            writeConfig(workspaceDir, 'nuget.config', '<configuration><packageSources><add key="A" value="http://a" /></packageSources></configuration>');
+            writeConfig(otherFolder, 'nuget.config', '<configuration><packageSources><add key="B" value="http://b" /></packageSources></configuration>');
+            const nested = writeConfig(workspaceDir, 'tools/nuget.config', '<configuration><packageSources><add key="C" value="http://c" /></packageSources></configuration>');
+            sandbox.stub(vscode.workspace, 'findFiles').resolves([vscode.Uri.file(nested)]);
+
+            const sources = await NuGetConfigResolver.GetWorkspaceSources(false);
+            const names = sources.filter(s => s.Url.startsWith('http://')).map(s => s.Name);
+
+            assert.deepStrictEqual(names.sort(), ['A', 'B', 'C']);
+        });
+
+        test('Hidden names are disabled names that no folder shows', async () => {
+            writeConfig(workspaceDir, 'nuget.config', `
+                <configuration>
+                    <packageSources><add key="A" value="http://a" /></packageSources>
+                    <disabledPackageSources>
+                        <add key="A" value="true" />
+                        <add key="Gone" value="true" />
+                    </disabledPackageSources>
+                </configuration>`);
+            writeConfig(otherFolder, 'nuget.config', '<configuration><packageSources><add key="A" value="http://a" /></packageSources></configuration>');
+            sandbox.stub(vscode.workspace, 'findFiles').resolves([]);
+
+            const hidden = await NuGetConfigResolver.GetWorkspaceHiddenSourceNames();
+
+            assert.ok(hidden.has('gone'));
+            assert.ok(!hidden.has('a'));
         });
     });
 });

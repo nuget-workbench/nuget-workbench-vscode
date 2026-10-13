@@ -4,6 +4,7 @@ import { RpcHost } from "@/common/rpc/rpc-host";
 import { createHostAPI } from "./host-api";
 import { Logger } from "../common/logger";
 import { PackageVersionDecorator } from "./utilities/package-version-decorator";
+import { WorkspaceWatcher } from "./utilities/workspace-watcher";
 
 export function activate(context: vscode.ExtensionContext) {
   Logger.configure(context);
@@ -11,6 +12,7 @@ export function activate(context: vscode.ExtensionContext) {
   const provider = new NugetViewProvider(context.extensionUri);
 
   context.subscriptions.push(new PackageVersionDecorator());
+  context.subscriptions.push(new WorkspaceWatcher((kinds) => provider.sendRefresh(kinds)));
 
   const previousVersion: string | undefined = context.globalState.get("NugetWorkbench.version");
   context.globalState.update("NugetWorkbench.version", context.extension.packageJSON.version);
@@ -78,7 +80,9 @@ export function activate(context: vscode.ExtensionContext) {
 type ViewCommand =
   | { type: "command"; command: "search"; query: string }
   | { type: "command"; command: "navigate-tab"; tab: string }
-  | { type: "command"; command: "navigate-route"; route: string };
+  | { type: "command"; command: "navigate-route"; route: string }
+  | { type: "command"; command: "refresh-projects" }
+  | { type: "command"; command: "refresh-configuration" };
 
 class NugetViewProvider implements vscode.WebviewViewProvider {
   private rpcHost: RpcHost | undefined;
@@ -98,6 +102,18 @@ class NugetViewProvider implements vscode.WebviewViewProvider {
 
   sendNavigateToRoute(route: string): void {
     this.postCommand({ type: "command", command: "navigate-route", route });
+  }
+
+  /** A view that is not ready yet loads the current state anyway, so nothing is queued. */
+  sendRefresh(kinds: Array<"projects" | "configuration">): void {
+    if (!this.webviewView || !this.webviewReady) return;
+    // The configuration first: reloading the projects may depend on the sources
+    if (kinds.includes("configuration")) {
+      this.webviewView.webview.postMessage({ type: "command", command: "refresh-configuration" });
+    }
+    if (kinds.includes("projects")) {
+      this.webviewView.webview.postMessage({ type: "command", command: "refresh-projects" });
+    }
   }
 
   /**

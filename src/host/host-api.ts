@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import * as path from "path";
 import type {
   HostAPI,
   GetProjectsRequest,
@@ -26,15 +27,18 @@ import type {
   GetVulnerablePackagesResponse,
   ShowConfirmationRequest,
   ShowConfirmationResponse,
-} from "@/common/rpc/types";
-import type { Result } from "@/common/rpc/result";
-import { ok, fail } from "@/common/rpc/result";
+} from "../common/rpc/types";
+import type { Result } from "../common/rpc/result";
+import { ok, fail } from "../common/rpc/result";
 import ProjectParser from "./utilities/project-parser";
 import CpmResolver from "./utilities/cpm-resolver";
+import AssetsReader from "./utilities/assets-reader";
 import nugetApiFactory from "./nuget/api-factory";
-import NuGetConfigResolver from "./utilities/nuget-config-resolver";
+import NuGetConfigResolver, { normalizeSourceUrl } from "./utilities/nuget-config-resolver";
 import TaskExecutor from "./utilities/task-executor";
 import { buildSourcesSetting } from "./utilities/sources-setting";
+import { buildSourceArgs } from "./utilities/source-args";
+import { isAzureArtifactsUrl } from "./utilities/credential-provider";
 import StatusBarUtils from "./utilities/status-bar-utils";
 import { Logger } from "../common/logger";
 import { AxiosError } from "axios";
@@ -60,7 +64,10 @@ function formatApiError(err: unknown): string {
     const detail = extractResponseDetail(err.response?.data);
     const suffix = detail ? ` (${detail})` : "";
     if (status === 401) {
-      return `Authentication failed (401) for ${url}.${suffix || " Check your credentials or access token."}`;
+      const hint = isAzureArtifactsUrl(url)
+        ? " Run `dotnet restore --interactive` once to sign in with the Azure Artifacts Credential Provider."
+        : " Check your credentials or access token.";
+      return `Authentication failed (401) for ${url}.${suffix || hint}`;
     }
     if (status === 403) {
       return `Access denied (403) for ${url}.${suffix || " Your token may lack the required permissions."}`;
@@ -91,12 +98,10 @@ export function createHostAPI(): HostAPI {
       Logger.info("getProjects: Handling request");
       if (request.ForceReload) {
         CpmResolver.ClearCache();
+        AssetsReader.ClearCache();
       }
 
-      const projectFiles = await vscode.workspace.findFiles(
-        "**/*.{csproj,fsproj,vbproj}",
-        "**/node_modules/**"
-      );
+      const projectFiles = await findProjectFiles();
 
       Logger.info(`getProjects: Found ${projectFiles.length} project files`);
 
@@ -106,6 +111,7 @@ export function createHostAPI(): HostAPI {
           const cpmVersions = await CpmResolver.GetPackageVersions(file.fsPath);
           const project = await ProjectParser.Parse(file.fsPath, cpmVersions);
           project.CpmEnabled = cpmVersions !== null;
+          await addTransitivePackages(project);
           projects.push(project);
         } catch (e) {
           Logger.error(`getProjects: Failed to parse project ${file.fsPath}`, e);
@@ -120,16 +126,16 @@ export function createHostAPI(): HostAPI {
     },
 
     async getPackages(request: GetPackagesRequest): Promise<Result<GetPackagesResponse>> {
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       StatusBarUtils.show(0, "Loading packages...");
 
       try {
         if (request.ForceReload) {
-          nugetApiFactory.ClearCache();
+          // The reload button also re-runs password scripts and asks the credential provider again
+          nugetApiFactory.ClearCredentials();
         }
 
         if (request.Url === "") {
-          const sources = await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot);
+          const sources = await NuGetConfigResolver.GetWorkspaceSources(true);
 
           if (!request.Filter) {
             if (sources.length > 0) {
@@ -207,8 +213,7 @@ export function createHostAPI(): HostAPI {
 
     async getPackage(request: GetPackageRequest): Promise<Result<GetPackageResponse>> {
       if (request.Url === "") {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const sources = await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot);
+        const sources = await NuGetConfigResolver.GetWorkspaceSources(true);
 
         for (const source of sources) {
           try {
@@ -270,12 +275,11 @@ export function createHostAPI(): HostAPI {
       const skipRestore = !!skipRestoreConfig && !isCpmEnabled;
 
       try {
-        if (request.Type === "UPDATE") {
-          await executeAddPackage(request.PackageId, request.ProjectPath, request.Version, skipRestore, request.SourceUrl);
-        } else if (request.Type === "UNINSTALL") {
+        if (request.Type === "UNINSTALL") {
           await executeRemovePackage(request.PackageId, request.ProjectPath);
         } else {
-          await executeAddPackage(request.PackageId, request.ProjectPath, request.Version, skipRestore, request.SourceUrl);
+          const sourceArgs = await buildSourceArgs(request.ProjectPath, request.SourceUrl, skipRestore);
+          await executeAddPackage(request.PackageId, request.ProjectPath, request.Version, skipRestore, sourceArgs);
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -290,6 +294,8 @@ export function createHostAPI(): HostAPI {
       try {
         const cpmVersions = await CpmResolver.GetPackageVersions(request.ProjectPath);
         const updatedProject = await ProjectParser.Parse(request.ProjectPath, cpmVersions);
+        updatedProject.CpmEnabled = cpmVersions !== null;
+        await addTransitivePackages(updatedProject);
         return ok({ Project: updatedProject, IsCpmEnabled: isCpmEnabled });
       } catch (err) {
         Logger.error(`updateProject: Failed to reload ${request.ProjectPath}`, err);
@@ -301,9 +307,8 @@ export function createHostAPI(): HostAPI {
       Logger.info("getConfiguration: Retrieving configuration");
       const config = vscode.workspace.getConfiguration("NugetWorkbench");
 
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       // Only names and URLs are needed here; running password scripts would delay the UI start
-      const resolved = await NuGetConfigResolver.GetSources(workspaceRoot, false);
+      const resolved = await NuGetConfigResolver.GetWorkspaceSources(false);
 
       const sources: Source[] = resolved.map((s) => ({
         Name: s.Name,
@@ -319,6 +324,9 @@ export function createHostAPI(): HostAPI {
           Prerelease: config.get("prerelease") ?? false,
           Sources: sources,
           StatusBarLoadingIndicator: config.get("statusBarLoadingIndicator") ?? false,
+          PageSize: Math.min(100, Math.max(1, Math.round(config.get<number>("pageSize") ?? 50))),
+          DefaultSource: config.get<string>("defaultSource") ?? "",
+          ShowOutputOnError: config.get<boolean>("showOutputOnError") ?? true,
         },
       });
     },
@@ -326,19 +334,18 @@ export function createHostAPI(): HostAPI {
     async updateConfiguration(request: UpdateConfigurationRequest): Promise<Result<void>> {
       Logger.info("updateConfiguration: Updating configuration");
       const config = vscode.workspace.getConfiguration("NugetWorkbench");
-      const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
       const sources = buildSourcesSetting(
         request.Configuration.Sources,
         config.get<string[]>("sources") ?? [],
-        await NuGetConfigResolver.GetBlockedSourceNames(workspaceRoot)
+        await NuGetConfigResolver.GetWorkspaceHiddenSourceNames()
       );
 
-      await config.update("skipRestore", request.Configuration.SkipRestore, vscode.ConfigurationTarget.Global);
-      await config.update("enablePackageVersionInlineInfo", request.Configuration.EnablePackageVersionInlineInfo, vscode.ConfigurationTarget.Global);
-      await config.update("prerelease", request.Configuration.Prerelease, vscode.ConfigurationTarget.Global);
-      await config.update("statusBarLoadingIndicator", request.Configuration.StatusBarLoadingIndicator, vscode.ConfigurationTarget.Global);
-      await config.update("sources", sources, vscode.ConfigurationTarget.Global);
+      await updateSetting(config, "skipRestore", request.Configuration.SkipRestore);
+      await updateSetting(config, "enablePackageVersionInlineInfo", request.Configuration.EnablePackageVersionInlineInfo);
+      await updateSetting(config, "prerelease", request.Configuration.Prerelease);
+      await updateSetting(config, "statusBarLoadingIndicator", request.Configuration.StatusBarLoadingIndicator);
+      await updateSetting(config, "sources", sources);
       Logger.info("updateConfiguration: Configuration updated successfully");
       return ok(undefined as void);
     },
@@ -373,21 +380,18 @@ export function createHostAPI(): HostAPI {
       StatusBarUtils.show(0, "Checking for updates...");
 
       try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        let sources = await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot);
+        let sources = await NuGetConfigResolver.GetWorkspaceSources(true);
 
         if (request.SourceUrl) {
-          sources = sources.filter((s) => s.Url === request.SourceUrl);
+          const selected = normalizeSourceUrl(request.SourceUrl);
+          sources = sources.filter((s) => normalizeSourceUrl(s.Url) === selected);
         }
 
         if (sources.length === 0) {
           return ok({ Packages: [] });
         }
 
-        let projectFiles = await vscode.workspace.findFiles(
-          "**/*.{csproj,fsproj,vbproj}",
-          "**/node_modules/**"
-        );
+        let projectFiles = await findProjectFiles();
 
         if (request.ProjectPaths && request.ProjectPaths.length > 0) {
           projectFiles = projectFiles.filter((f) => request.ProjectPaths!.includes(f.fsPath));
@@ -475,6 +479,8 @@ export function createHostAPI(): HostAPI {
           return fail(`Failed to check for updates: ${formatApiError(lookupErrors[0])}`);
         }
 
+        await markDeprecatedVersions(outdated, request.Prerelease);
+
         outdated.sort((a, b) => a.Id.localeCompare(b.Id));
         Logger.info(`getOutdatedPackages: Found ${outdated.length} outdated packages`);
         return ok({ Packages: outdated });
@@ -504,7 +510,8 @@ export function createHostAPI(): HostAPI {
             const skipRestore =
               !!vscode.workspace.getConfiguration("NugetWorkbench").get<string>("skipRestore") && !isCpm;
 
-            await executeAddPackage(update.PackageId, projectPath, update.Version, skipRestore);
+            const sourceArgs = await buildSourceArgs(projectPath, update.SourceUrl, skipRestore);
+            await executeAddPackage(update.PackageId, projectPath, update.Version, skipRestore, sourceArgs);
           }
 
           results.push({ PackageId: update.PackageId, Success: true });
@@ -517,6 +524,7 @@ export function createHostAPI(): HostAPI {
       }
 
       CpmResolver.ClearCache();
+      nugetApiFactory.ClearCache();
       StatusBarUtils.hide();
       return ok({ Results: results });
     },
@@ -525,10 +533,7 @@ export function createHostAPI(): HostAPI {
       Logger.info("getInconsistentPackages: Checking for version inconsistencies");
 
       try {
-        let projectFiles = await vscode.workspace.findFiles(
-          "**/*.{csproj,fsproj,vbproj}",
-          "**/node_modules/**"
-        );
+        let projectFiles = await findProjectFiles();
 
         if (request.ProjectPaths && request.ProjectPaths.length > 0) {
           projectFiles = projectFiles.filter((f) => request.ProjectPaths!.includes(f.fsPath));
@@ -605,17 +610,13 @@ export function createHostAPI(): HostAPI {
       StatusBarUtils.show(0, "Scanning for vulnerabilities...");
 
       try {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-        const sources = await NuGetConfigResolver.GetSourcesAndDecodePasswords(workspaceRoot);
+        const sources = await NuGetConfigResolver.GetWorkspaceSources(true);
 
         if (sources.length === 0) {
           return ok({ Packages: [] });
         }
 
-        let projectFiles = await vscode.workspace.findFiles(
-          "**/*.{csproj,fsproj,vbproj}",
-          "**/node_modules/**"
-        );
+        let projectFiles = await findProjectFiles();
 
         if (request.ProjectPaths && request.ProjectPaths.length > 0) {
           projectFiles = projectFiles.filter((f) => request.ProjectPaths!.includes(f.fsPath));
@@ -626,6 +627,7 @@ export function createHostAPI(): HostAPI {
           try {
             const cpmVersions = await CpmResolver.GetPackageVersions(file.fsPath);
             const project = await ProjectParser.Parse(file.fsPath, cpmVersions);
+            await addTransitivePackages(project);
             projects.push(project);
           } catch (e) {
             Logger.error(`getVulnerablePackages: Failed to parse ${file.fsPath}`, e);
@@ -653,6 +655,25 @@ export function createHostAPI(): HostAPI {
                 projects: [{ Name: project.Name, Path: project.Path }],
               });
             }
+          }
+        }
+
+        // Transitive packages that a project does not also reference directly
+        const transitiveMap = new Map<
+          string,
+          { id: string; version: string; projects: Array<{ Name: string; Path: string }>; via: Set<string> }
+        >();
+        for (const project of projects) {
+          for (const pkg of project.TransitivePackages ?? []) {
+            // A package that is direct in another project is still transitive here, with its own fix
+            const key = `${pkg.Id.toLowerCase()}::${normalizeVersion(pkg.Version)}`;
+            let entry = transitiveMap.get(key);
+            if (!entry) {
+              entry = { id: pkg.Id, version: pkg.Version, projects: [], via: new Set() };
+              transitiveMap.set(key, entry);
+            }
+            entry.projects.push({ Name: project.Name, Path: project.Path });
+            pkg.ViaIds.forEach((id) => entry!.via.add(id));
           }
         }
 
@@ -684,8 +705,12 @@ export function createHostAPI(): HostAPI {
         StatusBarUtils.show(60, "Matching vulnerabilities...");
 
         const vulnerable: VulnerablePackage[] = [];
+        const candidates = [
+          ...Array.from(installedMap.values()).map((p) => ({ ...p, transitive: false, via: [] as string[] })),
+          ...Array.from(transitiveMap.values()).map((p) => ({ ...p, transitive: true, via: Array.from(p.via) })),
+        ];
 
-        for (const installed of installedMap.values()) {
+        for (const installed of candidates) {
           const vulnEntries = allVulnerabilities.get(installed.id.toLowerCase());
           if (!vulnEntries) continue;
 
@@ -708,12 +733,15 @@ export function createHostAPI(): HostAPI {
               AdvisoryUrl: worstMatch.url,
               AffectedVersionRange: worstMatch.versions,
               Projects: installed.projects,
+              ...(installed.transitive && { IsTransitive: true, ViaIds: installed.via }),
             });
           }
         }
 
-        // Sort by severity (critical first), then by name
-        vulnerable.sort((a, b) => b.Severity - a.Severity || a.Id.localeCompare(b.Id));
+        // Direct references first (those can be updated here), then by severity and name
+        vulnerable.sort((a, b) =>
+          Number(!!a.IsTransitive) - Number(!!b.IsTransitive) || b.Severity - a.Severity || a.Id.localeCompare(b.Id)
+        );
 
         Logger.info(`getVulnerablePackages: Found ${vulnerable.length} vulnerable packages`);
         return ok({ Packages: vulnerable });
@@ -741,6 +769,7 @@ export function createHostAPI(): HostAPI {
       );
 
       try {
+        const sourceUrl = request.SourceUrl ?? (await findSourceWithVersion(request.PackageId, request.TargetVersion));
         for (let i = 0; i < request.ProjectPaths.length; i++) {
           const projectPath = request.ProjectPaths[i];
           StatusBarUtils.ShowText(
@@ -751,7 +780,8 @@ export function createHostAPI(): HostAPI {
           const skipRestore =
             !!vscode.workspace.getConfiguration("NugetWorkbench").get<string>("skipRestore") && !isCpm;
 
-          await executeAddPackage(request.PackageId, projectPath, request.TargetVersion, skipRestore);
+          const sourceArgs = await buildSourceArgs(projectPath, sourceUrl, skipRestore);
+          await executeAddPackage(request.PackageId, projectPath, request.TargetVersion, skipRestore, sourceArgs);
         }
 
         Logger.info(`consolidatePackages: Done`);
@@ -763,6 +793,7 @@ export function createHostAPI(): HostAPI {
       } finally {
         // Projects before the failing one were already changed
         CpmResolver.ClearCache();
+        nugetApiFactory.ClearCache();
         StatusBarUtils.hide();
       }
     },
@@ -776,18 +807,7 @@ export function createHostAPI(): HostAPI {
 async function executeRemovePackage(packageId: string, projectPath: string): Promise<void> {
   StatusBarUtils.ShowText(`Removing package ${packageId}...`);
   const args = ["remove", projectPath, "package", packageId];
-
-  const task = new vscode.Task(
-    { type: "dotnet", task: "dotnet remove package" },
-    vscode.TaskScope.Workspace,
-    "nuget-workbench",
-    "dotnet",
-    // ProcessExecution runs dotnet without a shell, so paths with "&", "(", "$" or quotes
-    // and values from the feed are passed verbatim instead of being interpreted by the shell
-    new vscode.ProcessExecution("dotnet", args)
-  );
-  task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
-  await TaskExecutor.ExecuteTask(task);
+  await TaskExecutor.ExecuteDotnet("dotnet remove package", args, path.dirname(projectPath));
 }
 
 async function executeAddPackage(
@@ -795,7 +815,7 @@ async function executeAddPackage(
   projectPath: string,
   version?: string,
   skipRestore = false,
-  sourceUrl?: string
+  sourceArgs: string[] = []
 ): Promise<void> {
   StatusBarUtils.ShowText(`Installing package ${packageId} ${version || "latest"}...`);
   const args = ["add", projectPath, "package", packageId];
@@ -806,19 +826,67 @@ async function executeAddPackage(
   if (skipRestore) {
     args.push("--no-restore");
   }
-  if (sourceUrl) {
-    args.push("-s", sourceUrl);
-  }
+  args.push(...sourceArgs);
 
-  const task = new vscode.Task(
-    { type: "dotnet", task: "dotnet add package" },
-    vscode.TaskScope.Workspace,
-    "nuget-workbench",
-    "dotnet",
-    new vscode.ProcessExecution("dotnet", args)
+  // Run from the project folder, so the restore finds the same nuget.config files as the project
+  await TaskExecutor.ExecuteDotnet("dotnet add package", args, path.dirname(projectPath));
+}
+
+function findProjectFiles(): Thenable<vscode.Uri[]> {
+  // An explicit exclude replaces files.exclude; build output may contain copies of project files
+  return vscode.workspace.findFiles("**/*.{csproj,fsproj,vbproj}", "**/{node_modules,bin,obj}/**");
+}
+
+async function addTransitivePackages(project: Project): Promise<void> {
+  const assets = await AssetsReader.Read(project.Path);
+  project.TransitivePackages = assets.Packages;
+  project.AssetsStatus = assets.Status;
+}
+
+/** Best effort: the registrations are usually cached from the Installed tab. */
+async function markDeprecatedVersions(outdated: OutdatedPackage[], prerelease: boolean): Promise<void> {
+  await Promise.allSettled(
+    outdated.map(async (pkg) => {
+      const api = await nugetApiFactory.GetSourceApi(pkg.SourceUrl);
+      const registration = await api.GetPackageAsync(pkg.Id, prerelease);
+      const deprecation = registration.data?.Deprecations?.[normalizeVersion(pkg.InstalledVersion)];
+      if (deprecation) pkg.InstalledDeprecation = deprecation;
+    })
   );
-  task.presentationOptions.reveal = vscode.TaskRevealKind.Silent;
-  await TaskExecutor.ExecuteTask(task);
+}
+
+/**
+ * The feed to restore a consolidation target from when the request does not name one. Only
+ * feeds from the "sources" setting have to be passed to dotnet, so without them nothing is looked up.
+ */
+async function findSourceWithVersion(packageId: string, version: string): Promise<string | undefined> {
+  const sources = await NuGetConfigResolver.GetWorkspaceSources(true);
+  if (!sources.some((s) => s.Origin === "settings")) return undefined;
+
+  for (const source of sources) {
+    try {
+      const api = await nugetApiFactory.GetSourceApi(source.Url);
+      const pkg = await api.GetPackageAsync(packageId, true);
+      if (pkg.data?.Versions.some((v) => compareVersions(v.Version, version) === 0)) {
+        return source.Url;
+      }
+    } catch {
+      // Not in this feed
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Writes a setting only when its value changes, to the workspace when the workspace already
+ * defines it (a user-level value would be shadowed by it) and to the user settings otherwise.
+ */
+async function updateSetting<T>(config: vscode.WorkspaceConfiguration, key: string, value: T): Promise<void> {
+  if (JSON.stringify(config.get(key)) === JSON.stringify(value)) return;
+  const target = config.inspect<T>(key)?.workspaceValue !== undefined
+    ? vscode.ConfigurationTarget.Workspace
+    : vscode.ConfigurationTarget.Global;
+  await config.update(key, value, target);
 }
 
 async function getLatestVersion(

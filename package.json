@@ -109,17 +109,19 @@
         "NugetWorkbench.defaultSource": {
           "type": "string",
           "default": "",
-          "description": "Default package source URL. If empty, uses the default from nuget.config."
+          "description": "Package source preselected in the source dropdown, by URL or name. If empty, all sources are searched."
         },
         "NugetWorkbench.pageSize": {
           "type": "number",
-          "default": 20,
+          "default": 50,
+          "minimum": 1,
+          "maximum": 100,
           "description": "Number of packages per search page."
         },
         "NugetWorkbench.showOutputOnError": {
           "type": "boolean",
           "default": true,
-          "description": "Automatically expand the output log when an operation fails."
+          "description": "Automatically expand the output log at the bottom of the NuGet view when an operation fails."
         },
         "NugetWorkbench.skipRestore": {
           "type": "boolean",

@@ -1,247 +1,146 @@
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
+import { EventEmitter } from 'events';
 import { TaskExecutor } from './task-executor';
+import { DotnetPseudoterminal } from './dotnet-runner';
 import { Logger } from '../../common/logger';
+
+type FakeProcess = EventEmitter & {
+    stdout: EventEmitter;
+    stderr: EventEmitter;
+    stdin: { end: sinon.SinonStub };
+    kill: sinon.SinonStub;
+    exitCode: number | null;
+    killed: boolean;
+};
 
 suite('TaskExecutor Tests', () => {
     let sandbox: sinon.SinonSandbox;
     let executeTaskStub: sinon.SinonStub;
-    let onDidEndTaskStub: sinon.SinonStub;
-    let onDidEndTaskProcessStub: sinon.SinonStub;
-    let processListeners: Array<(e: vscode.TaskProcessEndEvent) => void>;
-    let loggerInfoStub: sinon.SinonStub;
-    let loggerDebugStub: sinon.SinonStub;
+    let endTaskListeners: Array<(e: vscode.TaskEndEvent) => void>;
+    let spawnStub: sinon.SinonStub;
+    let processes: FakeProcess[];
+    // Opens the task's terminal like VS Code does when it runs a CustomExecution
+    let openTerminals: boolean;
 
     setup(() => {
         sandbox = sinon.createSandbox();
-        executeTaskStub = sandbox.stub(vscode.tasks, 'executeTask');
-        onDidEndTaskStub = sandbox.stub(vscode.tasks, 'onDidEndTask');
-        processListeners = [];
-        onDidEndTaskProcessStub = sandbox.stub(vscode.tasks, 'onDidEndTaskProcess').callsFake((listener: any) => {
-            processListeners.push(listener);
-            return { dispose: () => { processListeners = processListeners.filter((l) => l !== listener); } };
-        });
         sandbox.stub(Logger, 'error');
-        loggerInfoStub = sandbox.stub(Logger, 'info');
-        loggerDebugStub = sandbox.stub(Logger, 'debug');
+        sandbox.stub(Logger, 'info');
+        sandbox.stub(Logger, 'debug');
+
+        processes = [];
+        spawnStub = sandbox.stub(DotnetPseudoterminal, '_spawn' as any).callsFake(() => {
+            const proc = Object.assign(new EventEmitter(), {
+                stdout: new EventEmitter(),
+                stderr: new EventEmitter(),
+                stdin: { end: sandbox.stub() },
+                kill: sandbox.stub(),
+                exitCode: null,
+                killed: false,
+            });
+            processes.push(proc);
+            return proc;
+        });
+
+        openTerminals = true;
+        executeTaskStub = sandbox.stub(vscode.tasks, 'executeTask').callsFake(async (task: vscode.Task) => {
+            const execution = { task } as vscode.TaskExecution;
+            if (openTerminals) {
+                const customExecution = task.execution as any;
+                const callback = customExecution.callback ?? customExecution._callback;
+                const pty: vscode.Pseudoterminal = await callback({});
+                pty.open(undefined);
+            }
+            return execution;
+        });
+        endTaskListeners = [];
+        sandbox.stub(vscode.tasks, 'onDidEndTask').callsFake((listener: any) => {
+            endTaskListeners.push(listener);
+            return { dispose: () => { endTaskListeners = endTaskListeners.filter((l) => l !== listener); } };
+        });
     });
 
     teardown(() => {
         sandbox.restore();
     });
 
-    /** Fires onDidEndTaskProcess for the execution once ExecuteTask has subscribed. */
-    function endProcessSoon(execution: vscode.TaskExecution, exitCode: number | undefined) {
-        onDidEndTaskStub.returns({ dispose: () => {} });
-        setTimeout(() => processListeners.forEach((l) => l({ execution, exitCode })), 10);
+    /** Lets the running dotnet process print and exit once it was started. */
+    async function finishProcess(index: number, exitCode: number, output = '') {
+        while (processes.length <= index) {
+            await new Promise((resolve) => setTimeout(resolve, 1));
+        }
+        const proc = processes[index];
+        if (output) proc.stdout.emit('data', Buffer.from(output));
+        proc.emit('close', exitCode);
     }
 
-    test('ExecuteTask executes a task successfully', async () => {
-        const taskExecutor = new TaskExecutor();
-        const task = new vscode.Task(
-            { type: 'test' },
-            vscode.TaskScope.Workspace,
-            'Test Task',
-            'test-source'
-        );
+    test('runs dotnet without a shell in the given folder', async () => {
+        const executor = new TaskExecutor();
 
-        const taskExecution = { task } as vscode.TaskExecution;
-        executeTaskStub.resolves(taskExecution);
+        const run = executor.ExecuteDotnet('dotnet add package', ['add', 'App.csproj', 'package', 'Foo'], '/repo/App');
+        await finishProcess(0, 0, 'info : PackageReference added');
+        await run;
 
-        endProcessSoon(taskExecution, 0);
-
-        await taskExecutor.ExecuteTask(task);
-
-        assert.ok(executeTaskStub.calledOnceWith(task));
-        assert.ok(loggerInfoStub.calledWith(`TaskExecutor.ExecuteTask: Executing task ${task.name}`));
-        assert.ok(loggerInfoStub.calledWith(`TaskExecutor.ExecuteTask: Task ${task.name} completed`));
+        const [command, args, options] = spawnStub.firstCall.args;
+        assert.strictEqual(command, 'dotnet');
+        assert.deepStrictEqual(args, ['add', 'App.csproj', 'package', 'Foo']);
+        assert.strictEqual(options.shell, false);
+        assert.strictEqual(options.cwd, '/repo/App');
+        assert.ok(executeTaskStub.calledOnce);
     });
 
-    test('ExecuteTask logs debug info for ShellExecution', async () => {
-        const taskExecutor = new TaskExecutor();
-        const shellExecution = new vscode.ShellExecution('echo hello', { cwd: '.' });
-        const task = new vscode.Task(
-            { type: 'test' },
-            vscode.TaskScope.Workspace,
-            'Shell Task',
-            'test-source',
-            shellExecution
-        );
+    test('rejects with the errors from the dotnet output', async () => {
+        const executor = new TaskExecutor();
 
-        const taskExecution = { task } as vscode.TaskExecution;
-        executeTaskStub.resolves(taskExecution);
+        const run = executor.ExecuteDotnet('dotnet add package', ['add']);
+        await finishProcess(0, 1,
+            '  Determining projects to restore...\n' +
+            '/repo/App/App.csproj : error NU1101: Unable to find package Foo. No packages exist with this id in source(s): nuget.org [/repo/App/App.csproj]\n');
 
-        endProcessSoon(taskExecution, 0);
-
-        await taskExecutor.ExecuteTask(task);
-
-        assert.ok(loggerDebugStub.calledWithMatch(/TaskExecutor.ExecuteTask: Shell command: echo hello/));
+        await assert.rejects(run, (err: Error) =>
+            err.message === 'dotnet exited with code 1: error NU1101: Unable to find package Foo. No packages exist with this id in source(s): nuget.org');
     });
 
-    test('ExecuteTask logs debug info for ShellExecution with args array', async () => {
-        const taskExecutor = new TaskExecutor();
-        const shellExecution = new vscode.ShellExecution('echo', ['hello', 'world']);
-        const task = new vscode.Task(
-            { type: 'test' },
-            vscode.TaskScope.Workspace,
-            'Shell Task Args',
-            'test-source',
-            shellExecution
-        );
+    test('rejects when dotnet cannot be started', async () => {
+        const executor = new TaskExecutor();
 
-        const taskExecution = { task } as vscode.TaskExecution;
-        executeTaskStub.resolves(taskExecution);
+        const run = executor.ExecuteDotnet('dotnet add package', ['add']);
+        while (processes.length === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+        processes[0].emit('error', Object.assign(new Error('spawn dotnet ENOENT'), { code: 'ENOENT' }));
 
-        endProcessSoon(taskExecution, 0);
-
-        await taskExecutor.ExecuteTask(task);
-
-        assert.ok(loggerDebugStub.calledWithMatch(/TaskExecutor.ExecuteTask: Shell command: echo hello world/));
+        await assert.rejects(run, /dotnet could not be started \(spawn dotnet ENOENT\)/);
     });
 
-    test('ExecuteTask logs debug info for ProcessExecution', async () => {
-        const taskExecutor = new TaskExecutor();
-        const processExecution = new vscode.ProcessExecution('node', ['-v']);
-        const task = new vscode.Task(
-            { type: 'test' },
-            vscode.TaskScope.Workspace,
-            'Process Task',
-            'test-source',
-            processExecution
-        );
+    test('rejects when the task ends without opening its terminal', async () => {
+        openTerminals = false;
+        const executor = new TaskExecutor();
 
-        const taskExecution = { task } as vscode.TaskExecution;
-        executeTaskStub.resolves(taskExecution);
+        const run = executor.ExecuteDotnet('dotnet add package', ['add']);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        const task = executeTaskStub.firstCall.args[0];
+        endTaskListeners.forEach((l) => l({ execution: { task } as vscode.TaskExecution }));
 
-        endProcessSoon(taskExecution, 0);
-
-        await taskExecutor.ExecuteTask(task);
-
-        assert.ok(loggerDebugStub.calledWithMatch(/TaskExecutor.ExecuteTask: Process: node -v/));
+        await assert.rejects(run, /could not be started/);
     });
 
-    test('ExecuteTask handles concurrent calls sequentially via mutex', async () => {
-        const taskExecutor = new TaskExecutor();
-        const task1 = new vscode.Task({ type: 'test1' }, vscode.TaskScope.Workspace, 'Task 1', 'source');
-        const task2 = new vscode.Task({ type: 'test2' }, vscode.TaskScope.Workspace, 'Task 2', 'source');
-        const executionOrder: string[] = [];
+    test('runs one dotnet command at a time and continues after a failure', async () => {
+        const executor = new TaskExecutor();
 
-        onDidEndTaskStub.returns({ dispose: () => {} });
-        executeTaskStub.callsFake(async (t: vscode.Task) => {
-            executionOrder.push(`start ${t.name}`);
-            const execution = { task: t } as vscode.TaskExecution;
-            setTimeout(() => {
-                executionOrder.push(`end ${t.name}`);
-                processListeners.forEach((l) => l({ execution, exitCode: 0 }));
-            }, t === task1 ? 50 : 10);
-            return execution;
-        });
+        const first = executor.ExecuteDotnet('first', ['first']);
+        const second = executor.ExecuteDotnet('second', ['second']);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.strictEqual(spawnStub.callCount, 1, 'the second command waits for the first');
+        assert.ok(executor.IsBusy);
 
-        const p1 = taskExecutor.ExecuteTask(task1);
-        await new Promise(r => setTimeout(r, 5));
-        const p2 = taskExecutor.ExecuteTask(task2);
-        await Promise.all([p1, p2]);
+        await finishProcess(0, 1);
+        await assert.rejects(first);
+        await finishProcess(1, 0);
+        await second;
 
-        assert.deepStrictEqual(executionOrder, ['start Task 1', 'end Task 1', 'start Task 2', 'end Task 2']);
-    });
-
-    test('ExecuteTask rejects when the process exits with a non-zero code', async () => {
-        const taskExecutor = new TaskExecutor();
-        const task = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'Failing Task', 'source');
-        onDidEndTaskStub.returns({ dispose: () => {} });
-        executeTaskStub.callsFake(async (t: vscode.Task) => {
-            const execution = { task: t } as vscode.TaskExecution;
-            setTimeout(() => processListeners.forEach((l) => l({ execution, exitCode: 1 })), 5);
-            return execution;
-        });
-
-        await assert.rejects(() => taskExecutor.ExecuteTask(task), /exited with code 1/);
-        assert.strictEqual(processListeners.length, 0, 'listeners should be disposed');
-    });
-
-    test('ExecuteTask releases the mutex after a failure so later tasks still run', async () => {
-        const taskExecutor = new TaskExecutor();
-        const task = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'Task', 'source');
-        onDidEndTaskStub.returns({ dispose: () => {} });
-        executeTaskStub.onFirstCall().rejects(new Error('cannot start'));
-        executeTaskStub.onSecondCall().callsFake(async (t: vscode.Task) => {
-            const execution = { task: t } as vscode.TaskExecution;
-            setTimeout(() => processListeners.forEach((l) => l({ execution, exitCode: 0 })), 5);
-            return execution;
-        });
-
-        await assert.rejects(() => taskExecutor.ExecuteTask(task), /cannot start/);
-        await taskExecutor.ExecuteTask(task);
-        assert.strictEqual(executeTaskStub.callCount, 2);
-    });
-
-    test('ExecuteTask rejects when the process could not be started', async () => {
-        const taskExecutor = new TaskExecutor();
-        const task = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'Missing Task', 'source');
-        const execution = { task } as vscode.TaskExecution;
-        executeTaskStub.resolves(execution);
-        endProcessSoon(execution, undefined);
-
-        await assert.rejects(() => taskExecutor.ExecuteTask(task), /could not be started/);
-    });
-
-    test('ExecuteTask rejects when only the task end event arrives', async () => {
-        const taskExecutor = new TaskExecutor();
-        const task = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'No Process Task', 'source');
-        const execution = { task } as vscode.TaskExecution;
-        executeTaskStub.resolves(execution);
-        onDidEndTaskStub.callsFake((callback) => {
-            setTimeout(() => callback({ execution }), 10);
-            return { dispose: () => {} };
-        });
-
-        await assert.rejects(() => taskExecutor.ExecuteTask(task), /could not be started/);
-    });
-
-    test('ExecuteTask ignores a late end event of the previous task with the same name', async () => {
-        const taskExecutor = new TaskExecutor();
-        const task1 = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'same', 'source');
-        const task2 = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'same', 'source');
-        const execution1 = { task: task1 } as vscode.TaskExecution;
-        const execution2 = { task: task2 } as vscode.TaskExecution;
-        let taskEndListeners: Array<(e: vscode.TaskEndEvent) => void> = [];
-        onDidEndTaskStub.callsFake((listener: any) => {
-            taskEndListeners.push(listener);
-            return { dispose: () => { taskEndListeners = taskEndListeners.filter((l) => l !== listener); } };
-        });
-
-        let task2Finished = false;
-        executeTaskStub.onFirstCall().callsFake(async () => {
-            setTimeout(() => processListeners.forEach((l) => l({ execution: execution1, exitCode: 0 })), 5);
-            return execution1;
-        });
-        executeTaskStub.onSecondCall().callsFake(async () => {
-            // Task 1's onDidEndTask arrives while task 2 is starting
-            taskEndListeners.forEach((l) => l({ execution: execution1 }));
-            setTimeout(() => {
-                task2Finished = true;
-                processListeners.forEach((l) => l({ execution: execution2, exitCode: 0 }));
-            }, 30);
-            return execution2;
-        });
-
-        await taskExecutor.ExecuteTask(task1);
-        await taskExecutor.ExecuteTask(task2);
-        assert.strictEqual(task2Finished, true, 'task 2 must wait for its own process end');
-    });
-
-    test('ExecuteTask does not hang when the task ends before executeTask resolves', async () => {
-        const taskExecutor = new TaskExecutor();
-        const task = new vscode.Task({ type: 'test' }, vscode.TaskScope.Workspace, 'Fast Task', 'source');
-        onDidEndTaskStub.returns({ dispose: () => {} });
-        executeTaskStub.callsFake(async (t: vscode.Task) => {
-            const execution = { task: t } as vscode.TaskExecution;
-            processListeners.forEach((l) => l({ execution, exitCode: 0 }));
-            return execution;
-        });
-
-        await taskExecutor.ExecuteTask(task);
-        assert.ok(onDidEndTaskProcessStub.calledOnce);
+        assert.strictEqual(spawnStub.callCount, 2);
+        assert.ok(!executor.IsBusy);
+        assert.ok(executor.LastFinishedAt > 0);
     });
 });

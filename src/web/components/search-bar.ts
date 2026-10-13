@@ -73,18 +73,63 @@ export class SearchBar extends LitElement {
   @state() filterQuery: string = "";
   @state() selectedSourceUrl: string = "";
   @state() sortBy: SortOption = "relevance";
+  // The configuration the filters were last synchronized with
+  private seen = { prerelease: false, defaultSource: "", sources: "" };
 
   connectedCallback(): void {
     super.connectedCallback();
-    this.selectedSourceUrl = "";
+    this.selectedSourceUrl = configuration.DefaultSourceUrl;
     this.prerelease = configuration.Configuration?.Prerelease ?? false;
+    this.seen = this.currentConfiguration();
+    configuration.addEventListener("configuration-changed", this.onConfigurationChanged);
     this.emitFilterChangedEvent();
   }
 
   disconnectedCallback(): void {
     super.disconnectedCallback();
     this.delayedPackagesLoader.cancel();
+    configuration.removeEventListener("configuration-changed", this.onConfigurationChanged);
   }
+
+  private currentConfiguration() {
+    return {
+      prerelease: configuration.Configuration?.Prerelease ?? false,
+      defaultSource: configuration.DefaultSourceUrl,
+      sources: (configuration.Configuration?.Sources ?? []).map((s) => s.Url).sort().join("|"),
+    };
+  }
+
+  /**
+   * The settings can change outside the view (settings.json, nuget.config). Changed defaults are
+   * applied unless the user picked something else here; the results are reloaded once.
+   */
+  private onConfigurationChanged = (): void => {
+    const previous = this.seen;
+    const current = this.currentConfiguration();
+    this.seen = current;
+    let changed = false;
+
+    if (current.prerelease !== previous.prerelease && current.prerelease !== this.prerelease) {
+      this.prerelease = current.prerelease;
+      changed = true;
+    }
+    if (current.defaultSource !== previous.defaultSource && this.selectedSourceUrl === previous.defaultSource) {
+      this.selectedSourceUrl = current.defaultSource;
+      changed = true;
+    }
+
+    const sources = configuration.Configuration?.Sources ?? [];
+    if (this.selectedSourceUrl && !sources.some((s) => s.Url === this.selectedSourceUrl)) {
+      this.selectedSourceUrl = "";
+      changed = true;
+    } else if (!this.selectedSourceUrl && current.sources !== previous.sources) {
+      // "All" now searches a different set of feeds
+      changed = true;
+    }
+
+    if (changed) this.emitFilterChangedEvent();
+    this.requestUpdate();
+  };
 
   private async prereleaseChangedEvent(target: EventTarget): Promise<void> {
     this.prerelease = (target as HTMLInputElement).checked;
@@ -98,13 +143,7 @@ export class SearchBar extends LitElement {
     if (!config) return;
 
     await hostApi.updateConfiguration({
-      Configuration: {
-        SkipRestore: config.SkipRestore,
-        EnablePackageVersionInlineInfo: config.EnablePackageVersionInlineInfo,
-        Prerelease: this.prerelease,
-        Sources: config.Sources,
-        StatusBarLoadingIndicator: config.StatusBarLoadingIndicator,
-      },
+      Configuration: { ...config, Prerelease: this.prerelease },
     });
     await configuration.Reload();
   }

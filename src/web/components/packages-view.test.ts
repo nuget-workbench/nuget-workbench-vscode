@@ -166,7 +166,7 @@ suite('PackagesView Component', () => {
             packagesView.packages = [
                 new PackageViewModel(createMockPackage({ Id: 'Existing', Name: 'Existing' }))
             ];
-            packagesView.packagesPage = 1;
+            packagesView.packagesSkip = 50;
 
             (mockHostApi.getPackages as sinon.SinonStub).resolves(
                 ok({ Packages: [createMockPackage({ Id: 'NewPackage', Name: 'NewPackage' })] })
@@ -183,7 +183,7 @@ suite('PackagesView Component', () => {
             packagesView.packages = [
                 new PackageViewModel(createMockPackage({ Id: 'url/serilog', Name: 'Serilog' }))
             ];
-            packagesView.packagesPage = 1;
+            packagesView.packagesSkip = 50;
 
             (mockHostApi.getPackages as sinon.SinonStub).resolves(
                 ok({ Packages: [
@@ -213,7 +213,7 @@ suite('PackagesView Component', () => {
             await second;
 
             assert.deepStrictEqual(packagesView.packages.map(p => p.Name), ['Newtonsoft.Json']);
-            assert.strictEqual(packagesView.packagesPage, 1);
+            assert.strictEqual(packagesView.packagesSkip, 50);
         });
 
         test('should keep the feed of each search result', async () => {
@@ -248,6 +248,105 @@ suite('PackagesView Component', () => {
 
             const callArgs = (mockHostApi.getPackages as sinon.SinonStub).firstCall.args[0];
             assert.strictEqual(callArgs.ForceReload, true);
+        });
+    });
+
+    suite('Configuration', () => {
+        test('uses the page size setting for search requests', async () => {
+            (registrations.configuration as any)['configuration'].PageSize = 20;
+            (mockHostApi.getPackages as sinon.SinonStub).resolves(ok({ Packages: [] }));
+
+            await packagesView.LoadPackages();
+
+            assert.strictEqual((mockHostApi.getPackages as sinon.SinonStub).firstCall.args[0].Take, 20);
+        });
+
+        test('resolves the default source by URL or name', () => {
+            const config = (registrations.configuration as any)['configuration'];
+
+            config.DefaultSource = 'private';
+            assert.strictEqual(registrations.configuration.DefaultSourceUrl, 'https://private.nuget.org');
+            config.DefaultSource = 'https://API.nuget.org/v3/index.json/';
+            assert.strictEqual(registrations.configuration.DefaultSourceUrl, 'https://api.nuget.org/v3/index.json');
+            config.DefaultSource = 'unknown';
+            assert.strictEqual(registrations.configuration.DefaultSourceUrl, '');
+        });
+    });
+
+    suite('Bulk actions', () => {
+        setup(() => {
+            packagesView.projects = [
+                new ProjectViewModel(createMockProject('A', [{ Id: 'Pkg', Version: '1.0.0' }])),
+                new ProjectViewModel(createMockProject('B', [{ Id: 'Pkg', Version: '2.0.0' }])),
+                new ProjectViewModel(createMockProject('C', [{ Id: 'Pkg', Version: '[1.0.0]', IsPinned: true, VersionSource: 'project' }])),
+                new ProjectViewModel(createMockProject('D', [])),
+            ];
+            packagesView.selectedPackage = new PackageViewModel(createMockPackage({ Id: 'Pkg', Name: 'Pkg' }));
+            packagesView.selectedVersion = '2.0.0';
+        });
+
+        test('counts the projects each action applies to', () => {
+            assert.deepStrictEqual(packagesView.bulkTargets('INSTALL').map(p => p.Name), ['D']);
+            assert.deepStrictEqual(packagesView.bulkTargets('UPDATE').map(p => p.Name), ['A'], 'pinned and current versions are skipped');
+            assert.deepStrictEqual(packagesView.bulkTargets('UNINSTALL').map(p => p.Name), ['A', 'B', 'C']);
+        });
+
+        test('asks once before uninstalling from all projects', async () => {
+            const confirm = sandbox.stub().resolves(ok({ Confirmed: false }));
+            (mockHostApi as any).showConfirmation = confirm;
+
+            await packagesView.RunBulk('UNINSTALL');
+
+            assert.ok(confirm.calledOnce);
+            assert.ok(confirm.firstCall.args[0].Message.startsWith('Uninstall Pkg from 3 projects'));
+            assert.strictEqual(packagesView.bulkRunning, false);
+        });
+    });
+
+    suite('Transitive packages', () => {
+        test('lists transitive packages without the direct ones and without loading them', async () => {
+            const project = createMockProject('App', [{ Id: 'Serilog.AspNetCore', Version: '8.0.0' }]);
+            project.TransitivePackages = [
+                { Id: 'Serilog', Version: '3.1.1', Frameworks: ['net8.0'], ViaIds: ['Serilog.AspNetCore'] },
+                { Id: 'serilog.aspnetcore', Version: '8.0.0', Frameworks: ['net8.0'], ViaIds: ['Other'] },
+            ];
+            packagesView.projects = [new ProjectViewModel(project)];
+            const getPackage = mockHostApi.getPackage as sinon.SinonStub;
+            getPackage.resetHistory();
+
+            await packagesView.LoadProjectsPackages();
+
+            assert.deepStrictEqual(packagesView.transitivePackages.map(p => p.Name), ['Serilog']);
+            const serilog = packagesView.transitivePackages[0];
+            assert.strictEqual(serilog.IsTransitive, true);
+            assert.strictEqual(serilog.AllowsUpdate, false);
+            assert.deepStrictEqual(serilog.ViaIds, ['Serilog.AspNetCore']);
+            assert.deepStrictEqual(getPackage.getCalls().map(c => c.args[0].Id), ['Serilog.AspNetCore']);
+        });
+
+        test('selecting a transitive package from another tab opens it', async () => {
+            const project = createMockProject('App', []);
+            project.TransitivePackages = [{ Id: 'Serilog', Version: '3.1.1', Frameworks: ['net8.0'], ViaIds: ['Serilog.AspNetCore'] }];
+            packagesView.projects = [new ProjectViewModel(project)];
+            await packagesView.LoadProjectsPackages();
+
+            await (packagesView as any).onChildPackageSelected(new CustomEvent('package-selected', { detail: { packageId: 'serilog' } }));
+
+            assert.strictEqual(packagesView.selectedPackage, packagesView.transitivePackages[0]);
+        });
+    });
+
+    suite('RefreshFromWorkspace', () => {
+        test('reloads the projects without fetching every package again', async () => {
+            const getProjects = mockHostApi.getProjects as sinon.SinonStub;
+            getProjects.resetHistory();
+            getProjects.resolves(ok({ Projects: [createMockProject('Project1', [{ Id: 'Pkg1', Version: '1.0.0' }])] }));
+
+            await packagesView.RefreshFromWorkspace();
+
+            assert.ok(getProjects.calledOnce);
+            assert.strictEqual(getProjects.firstCall.args[0].ForceReload, false);
+            assert.strictEqual(packagesView.projects.length, 1);
         });
     });
 

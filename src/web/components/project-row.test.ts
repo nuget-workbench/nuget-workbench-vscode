@@ -249,4 +249,81 @@ suite('ProjectRow Component', () => {
         assert.strictEqual(shadowRoot?.querySelector('.codicon-arrow-circle-up'), null);
         assert.strictEqual(shadowRoot?.querySelector('.codicon-arrow-circle-down'), null);
     });
+
+    test('run() without confirmation and notification skips the dialog and the reload event', async () => {
+        let confirmations = 0;
+        (mockHostApi as any).showConfirmation = async () => { confirmations++; return ok({ Confirmed: true }); };
+        let updatedEvents = 0;
+        projectRow.addEventListener('project-updated', () => updatedEvents++);
+
+        const result = await projectRow.run('UNINSTALL', { confirm: false, notify: false });
+
+        assert.ok(result);
+        assert.strictEqual(confirmations, 0);
+        assert.strictEqual(updatedEvents, 0);
+    });
+
+    test('run() reports the operation and its error to the output log', async () => {
+        mockHostApi.updateProject = async () => ({ ok: false, error: 'dotnet exited with code 1: error NU1101: Unable to find package' });
+        const entries: Array<{ text: string; level: string }> = [];
+        projectRow.addEventListener('operation-log', (e) => entries.push((e as CustomEvent).detail));
+
+        const result = await projectRow.run('INSTALL');
+
+        assert.strictEqual(result, null);
+        assert.strictEqual(entries[0].level, 'info');
+        assert.ok(entries[0].text.startsWith('Installing TestPackage 1.0.0 in TestProject'));
+        assert.deepStrictEqual(entries[1], { text: 'TestProject: dotnet exited with code 1: error NU1101: Unable to find package', level: 'error' });
+    });
+
+    test('labels centrally managed versions and the project folder', async () => {
+        projectRow.project = new ProjectViewModel({
+            Name: 'TestProject',
+            Path: 'path/to/project',
+            Packages: [{ Id: 'TestPackage', Version: '1.0.0', IsPinned: false, VersionSource: 'central' }],
+            CpmEnabled: true,
+        });
+        projectRow.project.DirHint = 'src/TestProject';
+        await projectRow.updateComplete;
+
+        assert.strictEqual(projectRow.shadowRoot?.querySelector('.version-source')?.textContent, 'CPM');
+        assert.strictEqual(projectRow.shadowRoot?.querySelector('.dir-hint')?.textContent, 'src/TestProject');
+    });
+
+    test('shows a transitive version and offers a direct reference', async () => {
+        projectRow.project = new ProjectViewModel({
+            Name: 'TestProject',
+            Path: 'path/to/project',
+            Packages: [],
+            CpmEnabled: false,
+            TransitivePackages: [{ Id: 'TestPackage', Version: '0.9.0', Frameworks: ['net8.0'], ViaIds: ['Parent'] }],
+        });
+        await projectRow.updateComplete;
+
+        assert.strictEqual(projectRow.shadowRoot?.querySelector('.version.transitive')?.textContent?.trim(), '0.9.0 (transitive)');
+        assert.strictEqual(projectRow.shadowRoot?.querySelector('.icon-btn')?.getAttribute('title'), 'Add direct reference 1.0.0');
+    });
+
+    test('run() keeps the transitive packages returned for the project and logs an update as updated', async () => {
+        mockHostApi.updateProject = async () => ok({
+            Project: {
+                Name: 'TestProject',
+                Path: 'path/to/project',
+                Packages: [{ Id: 'TestPackage', Version: '2.0.0', IsPinned: false, VersionSource: 'project' }],
+                CpmEnabled: false,
+                TransitivePackages: [{ Id: 'Dep', Version: '1.0.0', Frameworks: ['net8.0'], ViaIds: ['TestPackage'] }],
+                AssetsStatus: 'ok',
+            },
+            IsCpmEnabled: false,
+        });
+        projectRow.packageVersion = '2.0.0';
+        const entries: Array<{ text: string; level: string }> = [];
+        projectRow.addEventListener('operation-log', (e) => entries.push((e as CustomEvent).detail));
+
+        await projectRow.run('UPDATE');
+
+        assert.deepStrictEqual(projectRow.project.TransitivePackages.map(p => p.Id), ['Dep']);
+        assert.strictEqual(projectRow.project.AssetsStatus, 'ok');
+        assert.strictEqual(entries[1].text, 'TestProject: TestPackage 2.0.0 updated');
+    });
 });

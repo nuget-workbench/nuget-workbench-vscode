@@ -15,14 +15,15 @@ import "./components/consolidate-view";
 import "./components/vulnerabilities-view";
 import "./components/project-tree";
 import "./components/nuget-output-log";
-import "./components/nuget-license-dialog";
 
 import "./main.css";
 
 type HostCommand =
   | { type: "command"; command: "search"; query: string }
   | { type: "command"; command: "navigate-tab"; tab: string }
-  | { type: "command"; command: "navigate-route"; route: string };
+  | { type: "command"; command: "navigate-route"; route: string }
+  | { type: "command"; command: "refresh-projects" }
+  | { type: "command"; command: "refresh-configuration" };
 
 @customElement("nuget-workbench")
 export class NuGetWorkbench extends LitElement {
@@ -72,6 +73,16 @@ export class NuGetWorkbench extends LitElement {
       }
       case "navigate-route": {
         router.Navigate(cmd.route as "BROWSE" | "SETTINGS");
+        break;
+      }
+      case "refresh-configuration": {
+        configuration.Reload();
+        break;
+      }
+      case "refresh-projects": {
+        // The packages view loads everything when it is shown again
+        const packagesView = this.shadowRoot?.querySelector("packages-view") as PackagesView | null;
+        packagesView?.RefreshFromWorkspace();
         break;
       }
     }

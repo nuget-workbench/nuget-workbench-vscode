@@ -172,13 +172,13 @@ export class SettingsView extends LitElement {
   private async updateConfiguration(): Promise<void> {
     await hostApi.updateConfiguration({
       Configuration: {
+        Prerelease: false,
+        StatusBarLoadingIndicator: false,
+        ...configuration.Configuration,
         SkipRestore: this.skipRestore,
         EnablePackageVersionInlineInfo: this.enablePackageVersionInlineInfo,
-        Prerelease: configuration.Configuration?.Prerelease ?? false,
         // A row that is still being added has no saved name/URL yet
         Sources: this.sources.filter((x) => x.Name && x.Url).map((x) => x.GetModel()),
-        StatusBarLoadingIndicator:
-          configuration.Configuration?.StatusBarLoadingIndicator ?? false,
       },
     });
     await configuration.Reload();

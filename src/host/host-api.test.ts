@@ -1,0 +1,188 @@
+import * as assert from 'assert';
+import * as sinon from 'sinon';
+import * as vscode from 'vscode';
+import { createHostAPI } from './host-api';
+import NuGetConfigResolver from './utilities/nuget-config-resolver';
+import CpmResolver from './utilities/cpm-resolver';
+import TaskExecutor from './utilities/task-executor';
+import ProjectParser from './utilities/project-parser';
+import AssetsReader from './utilities/assets-reader';
+import nugetApiFactory from './nuget/api-factory';
+import { Logger } from '../common/logger';
+
+suite('HostAPI Tests', () => {
+    let sandbox: sinon.SinonSandbox;
+
+    setup(() => {
+        sandbox = sinon.createSandbox();
+        sandbox.stub(Logger, 'info');
+        sandbox.stub(Logger, 'debug');
+        sandbox.stub(Logger, 'error');
+    });
+
+    teardown(() => {
+        sandbox.restore();
+    });
+
+    suite('updateConfiguration', () => {
+        const current: Record<string, unknown> = {
+            skipRestore: false,
+            enablePackageVersionInlineInfo: false,
+            prerelease: false,
+            statusBarLoadingIndicator: false,
+            sources: [JSON.stringify({ name: 'Mine', url: 'https://mine/v3/index.json' })],
+        };
+        let updateStub: sinon.SinonStub;
+        let workspaceValues: Record<string, unknown>;
+
+        setup(() => {
+            workspaceValues = {};
+            updateStub = sandbox.stub().resolves();
+            sandbox.stub(vscode.workspace, 'getConfiguration').returns({
+                get: (key: string) => (key in workspaceValues ? workspaceValues[key] : current[key]),
+                inspect: (key: string) => ({ key, workspaceValue: workspaceValues[key] }),
+                update: updateStub,
+            } as any);
+            sandbox.stub(NuGetConfigResolver, 'GetWorkspaceHiddenSourceNames').resolves(new Set());
+        });
+
+        function request(overrides: Partial<Configuration>) {
+            return {
+                Configuration: {
+                    SkipRestore: false,
+                    EnablePackageVersionInlineInfo: false,
+                    Prerelease: false,
+                    StatusBarLoadingIndicator: false,
+                    Sources: [{ Name: 'Mine', Url: 'https://mine/v3/index.json', Origin: 'settings' as const }],
+                    ...overrides,
+                } as Configuration,
+            };
+        }
+
+        test('writes only the settings that changed', async () => {
+            await createHostAPI().updateConfiguration(request({ Prerelease: true }));
+
+            assert.strictEqual(updateStub.callCount, 1);
+            assert.deepStrictEqual(updateStub.firstCall.args, ['prerelease', true, vscode.ConfigurationTarget.Global]);
+        });
+
+        test('writes to the workspace when the workspace defines the setting', async () => {
+            workspaceValues.skipRestore = true;
+
+            await createHostAPI().updateConfiguration(request({ SkipRestore: false }));
+
+            assert.deepStrictEqual(updateStub.firstCall.args, ['skipRestore', false, vscode.ConfigurationTarget.Workspace]);
+        });
+
+        test('does not copy workspace values into the user settings', async () => {
+            workspaceValues.skipRestore = true;
+
+            await createHostAPI().updateConfiguration(request({ SkipRestore: true, Prerelease: true }));
+
+            assert.ok(updateStub.neverCalledWith('skipRestore', sinon.match.any, sinon.match.any));
+        });
+    });
+
+    suite('batchUpdatePackages', () => {
+        test('passes a feed that only the extension knows to dotnet', async () => {
+            sandbox.stub(vscode.workspace, 'getConfiguration').returns({ get: () => false } as any);
+            sandbox.stub(CpmResolver, 'GetPackageVersions').resolves(null);
+            sandbox.stub(NuGetConfigResolver, 'GetSourcesWithCredentials').resolves([
+                { Name: 'nuget.org', Url: 'https://api.nuget.org/v3/index.json' },
+            ]);
+            const runStub = sandbox.stub(TaskExecutor, 'ExecuteDotnet').resolves();
+
+            const result = await createHostAPI().batchUpdatePackages({
+                Updates: [{
+                    PackageId: 'Company.Lib',
+                    Version: '2.0.0',
+                    ProjectPaths: ['/repo/App/App.csproj'],
+                    SourceUrl: 'https://settings-only/v3/index.json',
+                }],
+            });
+
+            assert.ok(result.ok && result.value.Results[0].Success);
+            const args: string[] = runStub.firstCall.args[1];
+            assert.deepStrictEqual(args.slice(0, 6), ['add', '/repo/App/App.csproj', 'package', 'Company.Lib', '--version', '2.0.0']);
+            assert.deepStrictEqual(args.slice(6), [
+                '-s', 'https://settings-only/v3/index.json',
+                '-s', 'https://api.nuget.org/v3/index.json',
+            ]);
+        });
+    });
+
+    suite('getVulnerablePackages', () => {
+        test('also reports vulnerable transitive packages, after the direct ones', async () => {
+            sandbox.stub(Logger, 'warn');
+            sandbox.stub(NuGetConfigResolver, 'GetWorkspaceSources').resolves([{ Name: 'nuget.org', Url: 'https://api.nuget.org/v3/index.json' }]);
+            sandbox.stub(vscode.workspace, 'findFiles').resolves([vscode.Uri.file('/repo/App/App.csproj')]);
+            sandbox.stub(CpmResolver, 'GetPackageVersions').resolves(null);
+            sandbox.stub(ProjectParser, 'Parse').resolves({
+                Name: 'App.csproj',
+                Path: '/repo/App/App.csproj',
+                Packages: [{ Id: 'Direct.Pkg', Version: '1.0.0', IsPinned: false, VersionSource: 'project' }],
+                CpmEnabled: false,
+            });
+            sandbox.stub(AssetsReader, 'Read').resolves({
+                Status: 'ok',
+                Packages: [
+                    { Id: 'Deep.Pkg', Version: '2.0.0', Frameworks: ['net8.0'], ViaIds: ['Direct.Pkg'] },
+                    { Id: 'Safe.Pkg', Version: '1.0.0', Frameworks: ['net8.0'], ViaIds: ['Direct.Pkg'] },
+                ],
+            });
+            sandbox.stub(nugetApiFactory, 'GetSourceApi').resolves({
+                GetVulnerabilitiesAsync: async () => new Map([
+                    ['deep.pkg', [{ url: 'https://advisory/deep', severity: 3, versions: '(, 2.1.0)' }]],
+                    ['direct.pkg', [{ url: 'https://advisory/direct', severity: 1, versions: '[1.0.0]' }]],
+                ]),
+            } as any);
+
+            const result = await createHostAPI().getVulnerablePackages({});
+
+            assert.ok(result.ok);
+            assert.deepStrictEqual(result.value.Packages.map((p) => `${p.Id}:${p.IsTransitive ?? false}`), [
+                'Direct.Pkg:false',
+                'Deep.Pkg:true',
+            ]);
+            assert.deepStrictEqual(result.value.Packages[1].ViaIds, ['Direct.Pkg']);
+        });
+
+        test('reports a package that is direct in one project and transitive in another for both', async () => {
+            sandbox.stub(Logger, 'warn');
+            sandbox.stub(NuGetConfigResolver, 'GetWorkspaceSources').resolves([{ Name: 'nuget.org', Url: 'https://api.nuget.org/v3/index.json' }]);
+            sandbox.stub(vscode.workspace, 'findFiles').resolves([
+                vscode.Uri.file('/repo/A/A.csproj'),
+                vscode.Uri.file('/repo/B/B.csproj'),
+            ]);
+            sandbox.stub(CpmResolver, 'GetPackageVersions').resolves(null);
+            const parse = sandbox.stub(ProjectParser, 'Parse');
+            parse.onFirstCall().resolves({
+                Name: 'A.csproj', Path: '/repo/A/A.csproj', CpmEnabled: false,
+                Packages: [{ Id: 'Vulnerable.Pkg', Version: '1.0.0', IsPinned: false, VersionSource: 'project' }],
+            });
+            parse.onSecondCall().resolves({
+                Name: 'B.csproj', Path: '/repo/B/B.csproj', CpmEnabled: false,
+                Packages: [{ Id: 'Parent', Version: '1.0.0', IsPinned: false, VersionSource: 'project' }],
+            });
+            const assets = sandbox.stub(AssetsReader, 'Read');
+            assets.onFirstCall().resolves({ Status: 'ok', Packages: [] });
+            assets.onSecondCall().resolves({
+                Status: 'ok',
+                Packages: [{ Id: 'Vulnerable.Pkg', Version: '1.0.0', Frameworks: ['net8.0'], ViaIds: ['Parent'] }],
+            });
+            sandbox.stub(nugetApiFactory, 'GetSourceApi').resolves({
+                GetVulnerabilitiesAsync: async () => new Map([
+                    ['vulnerable.pkg', [{ url: 'https://advisory', severity: 2, versions: '[1.0.0]' }]],
+                ]),
+            } as any);
+
+            const result = await createHostAPI().getVulnerablePackages({});
+
+            assert.ok(result.ok);
+            assert.deepStrictEqual(
+                result.value.Packages.map((p) => `${p.Projects.map((x) => x.Name).join(',')}:${p.IsTransitive ?? false}`),
+                ['A.csproj:false', 'B.csproj:true']
+            );
+        });
+    });
+});

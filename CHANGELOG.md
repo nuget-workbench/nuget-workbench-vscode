@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- feat: The view refreshes by itself when project files, `Directory.Packages.props`, `Directory.Build.props`, `NuGet.config` or the extension's settings change outside of it (e.g. after a `git checkout`)
+- feat: Transitive packages (from `obj/project.assets.json`) can be shown in the Installed tab, with the reference that pulls them in; the vulnerability scan covers them too
+- feat: Deprecated package versions are flagged in the Installed and Updates tabs, the details pane and the Versions tab, with the reason and the alternative package; the Versions tab also marks vulnerable versions
+- feat: Install, update or uninstall the selected package in all shown projects at once
+- feat: Failed `dotnet` operations report the NuGet error (e.g. `error NU1101: ...`) instead of only the exit code; all operations are listed in the output log
+- feat: Azure Artifacts feeds without credentials in `NuGet.config` use the Azure Artifacts Credential Provider or `VSS_NUGET_EXTERNAL_FEED_ENDPOINTS`
+- feat: Project rows show whether a version comes from `Directory.Packages.props` or a `VersionOverride`; the project tree shows a CPM badge and tells projects with the same name apart
+- fix: `NuGet.config` files are read like `dotnet` does, from the project folder up to the root; nested solutions and multi-root workspaces see all their sources
+- fix: Proxies work with default ports, proxy credentials, `NO_PROXY`, PAC files and `http.proxyStrictSSL` (VS Code's proxy support is used)
+- fix: Toggling Prerelease or changing settings no longer copies workspace settings into the user settings; settings defined by the workspace are saved there
+- fix: Updates and consolidations of packages from a feed that is only configured in the extension settings no longer fail
+- fix: `pageSize`, `defaultSource` and `showOutputOnError` take effect (`pageSize` now defaults to 50, the size used so far)
+- fix: Project discovery skips `bin` and `obj` folders; relative local feeds in `NuGet.config` are resolved against the config file
+- perf: `NuGet.config` files are parsed once until they change, and password scripts no longer run again after every install
+- chore: Remove the unused license acceptance dialog
 - chore: Sponsor button on the Marketplace page and in the Extensions view (GitHub Sponsors)
 
 ## 1.0.4 (2026-10-02)
