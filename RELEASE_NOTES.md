@@ -1,32 +1,16 @@
-- fix: Failed `dotnet` operations are reported as errors instead of success; a failing task no longer blocks all later installs
-- fix: Use `dotnet add <project> package` / `dotnet remove <project> package`, which work on every .NET SDK (the noun-first form needs .NET 10)
-- fix: Version comparison follows SemVer 2 / NuGet rules (stable > prerelease, build metadata ignored)
-- fix: Updates tab checks each project's version, so an outdated project is no longer hidden by a newer one elsewhere
-- fix: Long-running operations (updates, consolidation, scans) no longer fail after the 30 s RPC timeout
-- fix: Updates and Consolidate keep failed packages in the list and show the error instead of silently removing them
-- fix: Install/update/uninstall errors are shown on the project row
-- fix: Other tabs refresh after installing, updating or consolidating packages
-- fix: Selection highlight, stale search/detail results, and project selection resets after reloads
-- fix: Workspace `sources`/`skipRestore` settings are no longer erased when the view opens
-- fix: `PackageReference Update=` items no longer drop the whole project; CPM lookups are case-insensitive
-- fix: Credentials are stripped from logged HTTP errors
-- fix: Sort dropdown now sorts results (by downloads or name)
-- ux: Updates tab has select-all, "Update Selected (n)", per-row progress and busy states
-- ux: Downgrades are labelled as such; consolidation asks for confirmation and continues past failures
-- ux: Empty states, Retry buttons, keyboard-accessible dropdowns and links, focus/hover styles, better contrast for severity badges
-- ux: Search: Enter searches immediately, Escape clears; tab bar and search bar wrap in narrow panels
-- fix: `dotnet` runs without a shell, so project paths with `&`, `(`, `$` or quotes work and feed data cannot inject shell commands; a missing `dotnet` is reported as an error
-- fix: `NuGet.config` precedence follows NuGet: the workspace file overrides the user-level file and its `<clear/>` takes effect; encoded source names in credentials (`My_x0020_Feed`) are matched; disabled sources are not re-added from the settings
-- fix: Saving settings no longer copies the workspace's `NuGet.config` sources into the global `NugetWorkbench.sources` setting
-- fix: Confirmation dialogs no longer time out after 30 s
-- fix: Vulnerability scan ignores `$(Property)`, floating and range versions (false positives) and shows package ids with their original casing
-- fix: Search results no longer show results of an older query; the Dependencies tab works with "All sources"; duplicates across feeds and pages are removed
-- fix: Failed lookups show an error icon instead of a spinner forever; an install finishing after the project selection changed updates the right project
-- fix: Updates/Consolidate keep their busy state when the view reloads, and a double click no longer starts an update twice
-- fix: Password scripts can no longer hang the extension (stdin closed, two-minute timeout); `.ps1` runs with `pwsh` outside Windows
-- fix: CPM is also detected when `ManagePackageVersionsCentrally` is set in `Directory.Build.props` or the project; edits to `Directory.Packages.props` are picked up without a reload
-- fix: Inline version hints compare versions semantically and disappear when no longer valid
-- fix: Commands from the command palette work before the NuGet view was opened
-- fix: Basic auth supports non-Latin-1 characters and token-only credentials; a failing registration page no longer caches a truncated version list; unlisted versions are not offered as latest
-- docs: Step-by-step guide for the Marketplace token (`VSCE_PAT`), including the retirement of global PATs on December 1, 2026
-- chore(deps): non-breaking `npm audit fix` (axios, form-data, follow-redirects, lodash)
+- feat: The view refreshes by itself when project files, `Directory.Packages.props`, `Directory.Build.props`, `NuGet.config` or the extension's settings change outside of it (e.g. after a `git checkout`)
+- feat: Transitive packages (from `obj/project.assets.json`) can be shown in the Installed tab, with the reference that pulls them in; the vulnerability scan covers them too
+- feat: Deprecated package versions are flagged in the Installed and Updates tabs, the details pane and the Versions tab, with the reason and the alternative package; the Versions tab also marks vulnerable versions
+- feat: Install, update or uninstall the selected package in all shown projects at once
+- feat: Failed `dotnet` operations report the NuGet error (e.g. `error NU1101: ...`) instead of only the exit code; all operations are listed in the output log
+- feat: Azure Artifacts feeds without credentials in `NuGet.config` use the Azure Artifacts Credential Provider or `VSS_NUGET_EXTERNAL_FEED_ENDPOINTS`
+- feat: Project rows show whether a version comes from `Directory.Packages.props` or a `VersionOverride`; the project tree shows a CPM badge and tells projects with the same name apart
+- fix: `NuGet.config` files are read like `dotnet` does, from the project folder up to the root; nested solutions and multi-root workspaces see all their sources
+- fix: Proxies work with default ports, proxy credentials, `NO_PROXY`, PAC files and `http.proxyStrictSSL` (VS Code's proxy support is used)
+- fix: Toggling Prerelease or changing settings no longer copies workspace settings into the user settings; settings defined by the workspace are saved there
+- fix: Updates and consolidations of packages from a feed that is only configured in the extension settings no longer fail
+- fix: `pageSize`, `defaultSource` and `showOutputOnError` take effect (`pageSize` now defaults to 50, the size used so far)
+- fix: Project discovery skips `bin` and `obj` folders; relative local feeds in `NuGet.config` are resolved against the config file
+- perf: `NuGet.config` files are parsed once until they change, and password scripts no longer run again after every install
+- chore: Remove the unused license acceptance dialog
+- chore: Sponsor button on the Marketplace page and in the Extensions view (GitHub Sponsors)

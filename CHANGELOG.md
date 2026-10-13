@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.5 (2026-10-13)
+
 - feat: The view refreshes by itself when project files, `Directory.Packages.props`, `Directory.Build.props`, `NuGet.config` or the extension's settings change outside of it (e.g. after a `git checkout`)
 - feat: Transitive packages (from `obj/project.assets.json`) can be shown in the Installed tab, with the reference that pulls them in; the vulnerability scan covers them too
 - feat: Deprecated package versions are flagged in the Installed and Updates tabs, the details pane and the Versions tab, with the reason and the alternative package; the Versions tab also marks vulnerable versions
